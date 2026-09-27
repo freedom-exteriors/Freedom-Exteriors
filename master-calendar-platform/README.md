@@ -571,27 +571,57 @@ glare), big type.
 - **Still a v1, as the brief says:** anyone holding a wall link can see what's on it.
   Real device sign-in (pairing code + revocable device session) is the fast-follow.
 
-## Deploying (when you're ready)
+## Deploying
 
-1. **Supabase:** create a *new* project (not the CRM's).
-   - Set `DATABASE_URL` (pooler, port 6543, `?pgbouncer=true`) and `DIRECT_URL`
-     (port 5432).
-   - Run `npm run db:deploy`.
-   - Create a **private** Storage bucket `schedule-photos`.
-2. **Railway:** two services from this repo, sharing the env vars in `.env.example`:
-   - **api** runs `npm run start -w @mcp/api` (health check `/health`).
-   - **worker** runs `npm run worker -w @mcp/api`.
-   - Generate `CREDENTIALS_ENCRYPTION_KEY` and VAPID keys once.
-   - Set `NODE_ENV=production`, `WEB_ORIGIN` and `PUBLIC_WEB_URL` to the Vercel URL, and
-     `GOOGLE_REDIRECT_URI` to `https://<vercel-domain>/api/integrations/google/callback`.
-3. **Vercel:** a *new* project with root directory `master-calendar-platform/apps/web`.
-   - Build command: `npm run build`. Output directory: `dist`.
-   - Put the Railway API URL into `apps/web/vercel.json`.
-4. Optional keys, each unlocking one feature:
+Order matters: the database first, then the API (its URL goes into the web config), then
+the web app (its URL goes back into the API's env), then the household.
+
+1. **Supabase:** a *new* project (not the CRM's).
+   - Settings → Database → Connection string: copy the **Transaction pooler** string
+     (port 6543) as `DATABASE_URL`, adding `?pgbouncer=true`, and the **Session/direct**
+     string (port 5432) as `DIRECT_URL`.
+   - Storage → New bucket → `schedule-photos`, **private**.
+   - Settings → API: `SUPABASE_URL` and the `service_role` key as
+     `SUPABASE_SERVICE_ROLE_KEY` (server-only; never put it in the web app).
+2. **Railway:** one project, two services, both from this GitHub repo.
+   - Both: **Root Directory** `/master-calendar-platform`.
+   - **api**: Config-as-code path `/master-calendar-platform/infra/railway/api.json`.
+     It runs `npm run db:deploy` before each deploy, starts the server and health-checks
+     `/health`. Settings → Networking → **Generate Domain**.
+   - **worker**: config path `/master-calendar-platform/infra/railway/worker.json`. No
+     public domain.
+   - Variables: put the shared ones on the project (Shared Variables) and reference them
+     from both services:
+     `NODE_ENV=production`, `DATABASE_URL`, `DIRECT_URL`, `CREDENTIALS_ENCRYPTION_KEY`,
+     `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT=mailto:<you>`,
+     `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_STORAGE_BUCKET=schedule-photos`,
+     `WEB_ORIGIN` and `PUBLIC_WEB_URL` (both the Vercel URL, no trailing slash), plus any
+     optional keys below. Generate the encryption and VAPID keys once:
+     `node -e 'console.log(require("crypto").randomBytes(32).toString("base64"))'` and
+     `npx web-push generate-vapid-keys`. Changing the encryption key later makes stored
+     feed URLs and Google tokens unreadable.
+3. **Vercel:** a *new* project, root directory `master-calendar-platform/apps/web`
+   (framework Vite; build `npm run build`; output `dist`). Before the first deploy, put the
+   Railway api domain into `apps/web/vercel.json` in place of `YOUR-API.up.railway.app`.
+   Then set `WEB_ORIGIN`/`PUBLIC_WEB_URL` on Railway to the Vercel URL.
+4. **Your household:** don't run the demo seed in production. Instead:
+
+   ```sh
+   DATABASE_URL=<pooler url> PUBLIC_WEB_URL=https://<vercel-domain> \
+     npm run household -w @mcp/api -- --name "Jawor Family" --tz America/Chicago \
+     --owner you@example.com:You:driver --member partner@example.com:Partner:driver \
+     --member kid@example.com:Kid
+   ```
+
+   It creates the home, one person per email, and an email-locked invite link for each
+   (valid 14 days). Each person opens their link, signs up with that email and lands in the
+   home as themselves. Roles and "can drive" can be changed later in Settings → People.
+5. Optional keys, each unlocking one feature:
    - `ANTHROPIC_API_KEY`: photo reading.
    - `GOOGLE_MAPS_API_KEY`: live traffic and address lookup.
-   - `GOOGLE_CLIENT_*`: Google Calendar.
-   - `RESEND_API_KEY`: email.
+   - `GOOGLE_CLIENT_ID`/`SECRET` and `GOOGLE_REDIRECT_URI=https://<vercel-domain>/api/integrations/google/callback`:
+     Google Calendar.
+   - `RESEND_API_KEY` + `NOTIFY_FROM_EMAIL`: email alerts.
 
 ## Home hub: lists, goals, reminders
 

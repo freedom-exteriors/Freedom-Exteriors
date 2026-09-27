@@ -1,0 +1,14 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "builder": "RAILPACK",
+    "watchPatterns": ["/master-calendar-platform/apps/api/**", "/master-calendar-platform/packages/**", "/master-calendar-platform/package-lock.json"]
+  },
+  "deploy": {
+    "startCommand": "npm run start -w @mcp/api",
+    "preDeployCommand": ["npm run db:deploy"],
+    "healthcheckPath": "/health",
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 10
+  }
+}

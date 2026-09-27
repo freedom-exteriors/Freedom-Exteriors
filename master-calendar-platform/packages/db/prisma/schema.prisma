@@ -129,8 +129,9 @@ model WorkspaceInvite {
   // Home invites only: the Participant the invitee will "be" (e.g. Maya's own login).
   participantId   String?        @db.Uuid
   participant     Participant?   @relation(fields: [participantId], references: [id], onDelete: Cascade)
-  invitedByUserId String         @db.Uuid
-  invitedBy       User           @relation(fields: [invitedByUserId], references: [id], onDelete: Cascade)
+  // Null for invites issued by a setup script rather than a person.
+  invitedByUserId String?        @db.Uuid
+  invitedBy       User?          @relation(fields: [invitedByUserId], references: [id], onDelete: Cascade)
   expiresAt       DateTime       @db.Timestamptz(3)
   acceptedAt      DateTime?      @db.Timestamptz(3)
   createdAt       DateTime       @default(now()) @db.Timestamptz(3)
