@@ -35,6 +35,9 @@ model Workspace {
   name                String
   vertical            WorkspaceVertical
   kind                WorkspaceKind           @default(home)
+  // IANA zone. Day/week boundaries, availability windows, reminder dates and
+  // "leave by 5:12 PM" all resolve in this zone; storage stays UTC.
+  timeZone            String                  @default("America/Chicago")
   participants        Participant[]
   contacts            Contact[]
   calendarSources     CalendarSource[]
@@ -48,6 +51,8 @@ model Workspace {
   goals               Goal[]
   recurringReminders  RecurringReminder[]
   invites             WorkspaceInvite[]
+  places              Place[]
+  notifications       Notification[]
   // In circles: the Participant rows that represent this home.
   representedIn       Participant[]           @relation("LinkedWorkspace")
   createdAt           DateTime                @default(now()) @db.Timestamptz(3)
@@ -59,6 +64,7 @@ model User {
   passwordHash        String // argon2id
   memberships         WorkspaceMembership[]
   sessions            Session[]
+  notifications       Notification[]
   invitesSent         WorkspaceInvite[]
   // Attribution only ("added by Sam") — never used for authorization.
   tasksCreated        Task[]                @relation("TaskCreatedBy")
@@ -123,21 +129,30 @@ model WorkspaceInvite {
 // ───────────────────────── People ─────────────────────────
 
 model Participant {
-  id                String               @id @default(uuid()) @db.Uuid
-  workspaceId       String               @db.Uuid
-  workspace         Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  name              String
-  color             String // hex, e.g. "#3B82F6"
+  id                          String               @id @default(uuid()) @db.Uuid
+  workspaceId                 String               @db.Uuid
+  workspace                   Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name                        String
+  color                       String // hex, e.g. "#3B82F6"
   // Circles only: the home workspace this participant stands for ("Chen family").
-  linkedWorkspaceId String?              @db.Uuid
-  linkedWorkspace   Workspace?           @relation("LinkedWorkspace", fields: [linkedWorkspaceId], references: [id], onDelete: SetNull)
-  events            Event[]
-  assignedTasks     Task[]               @relation("AssignedTasks")
-  defaultForSources CalendarSource[]     @relation("DefaultParticipant")
-  membership        WorkspaceMembership?
-  goals             Goal[]
-  reminders         RecurringReminder[]
-  createdAt         DateTime             @default(now()) @db.Timestamptz(3)
+  linkedWorkspaceId           String?              @db.Uuid
+  linkedWorkspace             Workspace?           @relation("LinkedWorkspace", fields: [linkedWorkspaceId], references: [id], onDelete: SetNull)
+  events                      Event[]
+  assignedTasks               Task[]               @relation("AssignedTasks")
+  defaultForSources           CalendarSource[]     @relation("DefaultParticipant")
+  membership                  WorkspaceMembership?
+  goals                       Goal[]
+  reminders                   RecurringReminder[]
+  // Where this person starts from when no earlier event says otherwise (usually home).
+  homePlaceId                 String?              @db.Uuid
+  homePlace                   Place?               @relation("ParticipantHome", fields: [homePlaceId], references: [id], onDelete: SetNull)
+  // Can be handed errands and driving; kids usually can't. Leave-by alerts go to drivers.
+  canDrive                    Boolean              @default(false)
+  maxPlannedTaskMinutesPerDay Int                  @default(90) // the organizer never plans more than this
+  availability                AvailabilityWindow[]
+  drivingEvents               Event[]              @relation("EventDriver")
+  departureAlerts             DepartureAlert[]
+  createdAt                   DateTime             @default(now()) @db.Timestamptz(3)
 
   @@unique([workspaceId, linkedWorkspaceId])
   @@index([workspaceId])
@@ -223,6 +238,13 @@ model Event {
   endTime              DateTime            @db.Timestamptz(3)
   allDay               Boolean             @default(false)
   location             String?
+  // Resolved from `location` by geocoding (or picked by a person); needed for travel times.
+  placeId              String?             @db.Uuid
+  place                Place?              @relation(fields: [placeId], references: [id], onDelete: SetNull)
+  // Who's taking the participant there. Defaults to the participant if they drive.
+  driverParticipantId  String?             @db.Uuid
+  driver               Participant?        @relation("EventDriver", fields: [driverParticipantId], references: [id], onDelete: SetNull)
+  departureAlerts      DepartureAlert[]
   rawSourceData        Json
   contacts             EventContact[]
   tasks                Task[]
@@ -266,6 +288,17 @@ model AutomationRule {
   @@index([workspaceId])
 }
 
+enum TaskLocationKind {
+  home // needs to be done at home (fix the hinge)
+  errand // at `placeId` (Goodwill drop-off, Target pickup)
+  anywhere // a phone call, an online form
+}
+
+enum TaskScheduleStatus {
+  suggested
+  accepted
+}
+
 enum TaskPriority {
   low
   normal
@@ -277,35 +310,46 @@ enum TaskPriority {
 // (recurringReminderId + occurrenceDate). It can optionally sit on a TaskList and/or
 // count toward a Goal. Tasks with no list show up in the dashboard's general task view.
 model Task {
-  id                    String             @id @default(uuid()) @db.Uuid
-  workspaceId           String             @db.Uuid
-  workspace             Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  taskListId            String?            @db.Uuid
-  taskList              TaskList?          @relation(fields: [taskListId], references: [id], onDelete: SetNull)
-  goalId                String?            @db.Uuid // a step toward this goal
-  goal                  Goal?              @relation(fields: [goalId], references: [id], onDelete: SetNull)
-  eventId               String?            @db.Uuid
-  event                 Event?             @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  id                    String              @id @default(uuid()) @db.Uuid
+  workspaceId           String              @db.Uuid
+  workspace             Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  taskListId            String?             @db.Uuid
+  taskList              TaskList?           @relation(fields: [taskListId], references: [id], onDelete: SetNull)
+  goalId                String?             @db.Uuid // a step toward this goal
+  goal                  Goal?               @relation(fields: [goalId], references: [id], onDelete: SetNull)
+  eventId               String?             @db.Uuid
+  event                 Event?              @relation(fields: [eventId], references: [id], onDelete: Cascade)
   // Set when generated by the rule engine; with eventId it makes the scheduled job idempotent.
-  automationRuleId      String?            @db.Uuid
-  automationRule        AutomationRule?    @relation(fields: [automationRuleId], references: [id], onDelete: SetNull)
+  automationRuleId      String?             @db.Uuid
+  automationRule        AutomationRule?     @relation(fields: [automationRuleId], references: [id], onDelete: SetNull)
   // Set when generated by a recurring/seasonal reminder, for the occurrence it covers.
-  recurringReminderId   String?            @db.Uuid
-  recurringReminder     RecurringReminder? @relation(fields: [recurringReminderId], references: [id], onDelete: SetNull)
-  occurrenceDate        DateTime?          @db.Date
-  assignedParticipantId String?            @db.Uuid
-  assignedParticipant   Participant?       @relation("AssignedTasks", fields: [assignedParticipantId], references: [id], onDelete: SetNull)
+  recurringReminderId   String?             @db.Uuid
+  recurringReminder     RecurringReminder?  @relation(fields: [recurringReminderId], references: [id], onDelete: SetNull)
+  occurrenceDate        DateTime?           @db.Date
+  assignedParticipantId String?             @db.Uuid
+  assignedParticipant   Participant?        @relation("AssignedTasks", fields: [assignedParticipantId], references: [id], onDelete: SetNull)
   title                 String
   notes                 String?
-  priority              TaskPriority       @default(normal)
-  position              Float              @default(0) // manual ordering within a list
-  dueAt                 DateTime?          @db.Timestamptz(3)
-  completedAt           DateTime?          @db.Timestamptz(3)
-  createdByUserId       String?            @db.Uuid
-  createdBy             User?              @relation("TaskCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  completedByUserId     String?            @db.Uuid
-  completedBy           User?              @relation("TaskCompletedBy", fields: [completedByUserId], references: [id], onDelete: SetNull)
-  createdAt             DateTime           @default(now()) @db.Timestamptz(3)
+  priority              TaskPriority        @default(normal)
+  position              Float               @default(0) // manual ordering within a list
+  dueAt                 DateTime?           @db.Timestamptz(3)
+  // ─ Schedule organizer inputs ─
+  estimatedMinutes      Int? // required for the organizer to place it
+  locationKind          TaskLocationKind    @default(home)
+  placeId               String?             @db.Uuid // where an errand happens
+  place                 Place?              @relation(fields: [placeId], references: [id], onDelete: SetNull)
+  // ─ Schedule organizer output ─ suggested slots are replaced on every re-plan;
+  // accepted ones are treated as fixed, like an event.
+  scheduledStart        DateTime?           @db.Timestamptz(3)
+  scheduledEnd          DateTime?           @db.Timestamptz(3)
+  scheduleStatus        TaskScheduleStatus?
+  scheduleReason        String? // "Near Target after practice: +6 min detour"
+  completedAt           DateTime?           @db.Timestamptz(3)
+  createdByUserId       String?             @db.Uuid
+  createdBy             User?               @relation("TaskCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  completedByUserId     String?             @db.Uuid
+  completedBy           User?               @relation("TaskCompletedBy", fields: [completedByUserId], references: [id], onDelete: SetNull)
+  createdAt             DateTime            @default(now()) @db.Timestamptz(3)
 
   @@unique([automationRuleId, eventId])
   @@unique([recurringReminderId, occurrenceDate])
@@ -350,6 +394,9 @@ model ShoppingList {
   key               String?
   name              String // "Groceries", "Costco run", "Dorm supplies", "Supply order"
   preferredRetailer Retailer?
+  // A store to pick this list up from; turns the list into an errand the organizer can plan.
+  placeId           String?        @db.Uuid
+  place             Place?         @relation(fields: [placeId], references: [id], onDelete: SetNull)
   viewerCanAdd      Boolean        @default(true)
   position          Float          @default(0)
   items             ShoppingItem[]
@@ -465,4 +512,112 @@ model UploadedScheduleImage {
   createdAt       DateTime         @default(now()) @db.Timestamptz(3)
 
   @@index([workspaceId])
+}
+
+// ───────────────────────── Places, availability, travel ─────────────────────────
+
+enum PlaceKind {
+  home
+  work
+  school
+  activity // field, gym, studio
+  store
+  other
+}
+
+model Place {
+  id                   String         @id @default(uuid()) @db.Uuid
+  workspaceId          String         @db.Uuid
+  workspace            Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name                 String // "Home", "Eastside Park", "Target — Main St"
+  kind                 PlaceKind      @default(other)
+  address              String?
+  latitude             Float
+  longitude            Float
+  googlePlaceId        String?
+  // [{ dayOfWeek, startMinute, endMinute }] in the workspace's time zone; null = always open.
+  // Errands are only planned inside these. Can be filled from Google Places later.
+  openingHours         Json?
+  // Minutes to park and walk in; added to drive time. Big venues/schools need more.
+  arrivalBufferMinutes Int            @default(5)
+  homeOf               Participant[]  @relation("ParticipantHome")
+  events               Event[]
+  tasks                Task[]
+  shoppingLists        ShoppingList[]
+  createdAt            DateTime       @default(now()) @db.Timestamptz(3)
+
+  @@index([workspaceId])
+}
+
+// When a person is free for the organizer to plan tasks, in the workspace's time zone
+// (e.g. Sat 09:00–17:00, weeknights 18:30–20:30). Several windows per day are fine.
+model AvailabilityWindow {
+  id            String      @id @default(uuid()) @db.Uuid
+  participantId String      @db.Uuid
+  participant   Participant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+  dayOfWeek     Int // 0 = Sunday … 6 = Saturday
+  startMinute   Int // minutes after local midnight
+  endMinute     Int
+
+  @@index([participantId])
+}
+
+enum DepartureAlertStatus {
+  scheduled // leave-by computed, traffic will be re-checked
+  notified // "time to leave" sent
+  skipped // no origin/place, or the event was cancelled
+}
+
+// One per (event, driver). The departure job re-checks traffic as the event approaches
+// and moves leaveBy; `notifiedAt` makes the warning fire once.
+model DepartureAlert {
+  id              String               @id @default(uuid()) @db.Uuid
+  eventId         String               @db.Uuid
+  event           Event                @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  participantId   String               @db.Uuid // the driver
+  participant     Participant          @relation(fields: [participantId], references: [id], onDelete: Cascade)
+  originLabel     String // "Home", or the previous event's place
+  originLatitude  Float
+  originLongitude Float
+  leaveBy         DateTime             @db.Timestamptz(3)
+  trafficMinutes  Int
+  typicalMinutes  Int // no-traffic baseline, for "8 min longer than usual"
+  nextCheckAt     DateTime?            @db.Timestamptz(3)
+  lastCheckedAt   DateTime             @db.Timestamptz(3)
+  notifiedAt      DateTime?            @db.Timestamptz(3)
+  status          DepartureAlertStatus @default(scheduled)
+  createdAt       DateTime             @default(now()) @db.Timestamptz(3)
+
+  @@unique([eventId, participantId])
+  @@index([status, nextCheckAt])
+}
+
+// ───────────────────────── Notifications ─────────────────────────
+
+enum NotificationChannel {
+  web_push
+  sms
+  email
+}
+
+// Outbox: jobs write rows here, a sender delivers them. `dedupeKey` (e.g.
+// "leave:<alertId>") stops a job re-run from double-notifying.
+model Notification {
+  id          String              @id @default(uuid()) @db.Uuid
+  userId      String              @db.Uuid
+  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspaceId String              @db.Uuid
+  workspace   Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  channel     NotificationChannel
+  title       String
+  body        String
+  url         String? // deep link into the app
+  sendAt      DateTime            @db.Timestamptz(3)
+  sentAt      DateTime?           @db.Timestamptz(3)
+  error       String?
+  dedupeKey   String
+  createdAt   DateTime            @default(now()) @db.Timestamptz(3)
+
+  @@unique([userId, dedupeKey, channel])
+  @@index([sentAt, sendAt])
 }

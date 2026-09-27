@@ -22,7 +22,8 @@ React web app · Supabase Storage for photos · Vercel (web) + Railway (API + cr
 | 5 | Unified event query endpoint (incl. circle events assigned to your household) | |
 | 6 | Lists & goals API: shopping lists, task lists, goals with milestones | *new* |
 | 7 | Photo extraction → review → confirm | |
-| 8 | Scheduled jobs: automation rule engine + seasonal reminder generator | *reminders new* |
+| 8 | Scheduled jobs: automation rule engine, seasonal reminders, **leave-by traffic alerts**, notification sender | *expanded* |
+| 8b | **Schedule organizer** API: daily/weekly plan, accept/move suggestions (engine already built in `packages/planner`) | *new* |
 | 9 | Retailer handoff (see below) | *new* |
 | 10 | Dashboard frontend | |
 | 11 | Wall/kiosk route (+ today's chores and the grocery list) | |
@@ -69,6 +70,8 @@ packages/db/
                             store sections, seasonal reminders
   src/                      createPrismaClient(), createWorkspaceFromTemplate(), generated client
   test/                     node:test suites
+packages/planner/           schedule organizer + leave-by logic + Google Routes/Geocoding clients (pure, no DB)
+scripts/demo-organizer.ts   runs both against the seeded Rivera family: `npm run demo:organizer`
 packages/shared-types/      types shared by the API and the web app (no Prisma import)
 apps/                       api and web start in steps 2 and 8
 infra/docker-compose.yml    local Postgres
@@ -100,6 +103,73 @@ All of this is generic. Only the template data differs by vertical.
   on the target list. `(recurringReminderId, occurrenceDate)` is unique, so re-runs never
   duplicate. Each template seeds 6–10 of these, and every one can be edited or turned off.
 
+## Schedule organizer (daily + weekly)
+
+`organizeDay` / `organizeWeek` in `packages/planner` fit honey-dos, chores, errands and
+calls into the gaps in each person's schedule. They return **suggestions**. You accept
+a suggestion (it becomes fixed, like an event) or move it. Re-planning never touches
+accepted items.
+
+How it decides what "makes logistical sense":
+
+- **Where you'll be.** Each gap runs from where one block ends (practice at Eastside
+  Park) to where the next one starts. For each task location it computes the extra
+  driving a slot costs: *detour = (there → task) + (task → next place) − (there → next
+  place)*. Errands next to where you already are cost about 0. A home task can't go in a
+  40-minute gap between two far-apart events, because the driving doesn't leave room.
+- **Placed tasks become stops.** Errands near each other chain into one trip.
+- **Several orderings.** A greedy planner is order-sensitive: the Goodwill run could take
+  the post-practice slot that the hardware store next door needed. So it plans with a few
+  task orderings (by priority, "errands that piggyback on a trip first", shortest first)
+  and keeps the best total. The demo shows this: paint samples land right after
+  practice (+6 min) and Goodwill moves to a Sunday morning slot.
+- **Real constraints.** Each person's availability windows (`AvailabilityWindow`), store
+  opening hours (`Place.openingHours`), due dates, a daily cap on planned-task minutes
+  (`maxPlannedTaskMinutesPerDay`, so evenings aren't filled wall to wall), errands only for
+  people who drive (`canDrive`), transition buffers, and parking/walk-in time per place.
+- **Priority.** High priority pulls toward today, low floats. Overdue items come first.
+- **Honest leftovers.** Tasks with no time estimate, or that can't fit, come back as
+  `unplaced` with a reason ("needs estimate", "no one eligible", "no fitting gap") for
+  the UI to show.
+- **Cost-aware.** Weekly planning uses a free straight-line drive-time estimate. Live
+  traffic is only fetched for today's leave-by alerts.
+- Deterministic, pure, and covered by 18 tests (DST days, store hours, chaining, limits).
+
+Needs from the schema, all added: `Workspace.timeZone`, `Place` (geocoded, hours,
+parking buffer), `Participant.homePlaceId / canDrive / maxPlannedTaskMinutesPerDay`,
+`AvailabilityWindow`, `Event.placeId / driverParticipantId`, `Task.estimatedMinutes /
+locationKind / placeId / scheduledStart / scheduledEnd / scheduleStatus / scheduleReason`,
+and `ShoppingList.placeId` (a Target list becomes an errand at that Target).
+
+## Leave-by warnings (live traffic)
+
+For each upcoming event with a place and a **driver** (`Event.driverParticipantId`; kids
+don't get "leave now" alerts, whoever drives them does):
+
+1. **Origin:** the driver's previous stop if it ended in the last 90 min (school pickup →
+   practice), otherwise home. It's inferred from the schedule, not GPS: the web app
+   can't track location in the background, and native apps are out of scope.
+2. **Drive time with traffic** from Google **Routes API** (`TRAFFIC_AWARE_OPTIMAL`) *at the
+   actual departure time*. It asks once, then again at the departure time the first
+   answer implies, because traffic at 4:40 and 5:05 PM differs.
+3. **Leave by** = start − parking/walk-in − drive − 5 min to get out the door.
+4. **Re-check** traffic about 2 h, 45 min and 15 min before leave-by. If leave-by
+   moves 10+ minutes earlier, notify right away ("Traffic: leave 15 min earlier for
+   Game").
+5. **Warn** 10 min before leave-by, once: *"Leave by 4:50 PM — Soccer practice · 30 min
+   drive from Home; 15 min longer than usual — heavy traffic."*
+
+State lives in `DepartureAlert` (one per event and driver). Messages go through a
+`Notification` outbox (web push / SMS / email) with a dedupe key, so job re-runs never
+double-notify. An event with a place but no driver shows "No driver for Swim Practice"
+instead, which ties into the "Who's driving?" automation rule. Places are geocoded with
+the Google Geocoding API, biased toward the household's area.
+
+**Needs:** `GOOGLE_MAPS_API_KEY` with the Routes API and Geocoding API enabled. Both are
+billed per request by Google, which is why the organizer uses free estimates and only
+alerts use live traffic. Without a key, the demo uses clearly labeled simulated rush-hour
+traffic.
+
 ## Circles: planning with other families
 
 A **circle** is a workspace with `kind = circle`: "Eastside FC U12 parents", "Rivera +
@@ -119,6 +189,18 @@ boundary. Nothing new was needed there.
 - The circle template seeds tags (carpool / get-together / trip / sign-up slot), a "Who's
   bringing what" list, and rules that flag an undriven carpool or an unclaimed sign-up
   slot ahead of time.
+
+## Deployment status
+
+Nothing is deployed yet. Code is on the branch and tested against a local Postgres. The
+target setup, per the original brief:
+
+| Piece | Where | Notes |
+|---|---|---|
+| Postgres | **Supabase** (DB only, Prisma migrations) | Needs a *new* Supabase project. Don't reuse the Freedom Exteriors CRM project. |
+| Schedule photos | **Supabase Storage**, private bucket | Same new project. |
+| Web app | **Vercel** | A new Vercel project with root directory `master-calendar-platform/apps/web`, separate from the CRM's. |
+| API + scheduled jobs | **Railway** | The leave-by job runs every few minutes and re-checks traffic. That needs a long-running worker, not Vercel's cron (daily-only on the Hobby plan). |
 
 ## Retailer integrations: what's actually possible
 

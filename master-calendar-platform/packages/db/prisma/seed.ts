@@ -21,12 +21,39 @@ interface SeedEvent {
   startHourUtc: number;
   durationMinutes: number;
   location?: string;
+  place?: string; // key into SeedWorkspace.places
+  driver?: string; // participant name
 }
+
+interface SeedPlace {
+  key: string;
+  name: string;
+  kind: "home" | "work" | "school" | "activity" | "store" | "other";
+  lat: number;
+  lng: number;
+  address?: string;
+  arrivalBufferMinutes?: number;
+  /** [days, open hour, close hour] */
+  hours?: [number[], number, number][];
+}
+
+type SeedTaskLocation = "home" | "anywhere" | { errand: string };
 
 interface SeedWorkspace {
   name: string;
   vertical: WorkspaceVertical;
-  participants: { name: string; color: string }[];
+  participants: {
+    name: string;
+    color: string;
+    canDrive?: boolean;
+    maxPlannedTaskMinutesPerDay?: number;
+    /** [days (0 = Sun), start hour, end hour] in the workspace's time zone. */
+    availability?: [number[], number, number][];
+  }[];
+  /** The "home" place becomes every participant's starting point. */
+  places?: SeedPlace[];
+  /** Shopping list key → store place key (makes the list an errand). */
+  shoppingListPlaces?: Record<string, string>;
   users: { email: string; role: "owner" | "member" | "viewer"; participant: string | null }[];
   contacts: { name: string; role: string; organization?: string; email?: string; phone?: string }[];
   sourceName: string;
@@ -35,7 +62,17 @@ interface SeedWorkspace {
   /** Items for template-seeded shopping lists, keyed by list key. */
   shopping: Record<string, { name: string; quantity?: string; category?: string; isStaple?: boolean; addedBy?: string }[]>;
   /** Tasks for template-seeded task lists, keyed by list key. */
-  tasks: Record<string, { title: string; participant?: string; priority?: "low" | "normal" | "high"; dueInDays?: number }[]>;
+  tasks: Record<
+    string,
+    {
+      title: string;
+      participant?: string;
+      priority?: "low" | "normal" | "high";
+      dueInDays?: number;
+      estimatedMinutes?: number;
+      location?: SeedTaskLocation;
+    }[]
+  >;
   goals: {
     title: string;
     horizon: "short_term" | "long_term";
@@ -50,11 +87,23 @@ const workspaces: SeedWorkspace[] = [
     name: "Rivera Family",
     vertical: "family",
     participants: [
-      { name: "Alex", color: "#2563EB" },
-      { name: "Sam", color: "#16A34A" },
-      { name: "Maya", color: "#DB2777" },
-      { name: "Leo", color: "#EA580C" },
+      { name: "Alex", color: "#2563EB", canDrive: true, maxPlannedTaskMinutesPerDay: 120, availability: [[[1, 2, 3, 4, 5], 17.5, 21], [[0, 6], 8, 18]] },
+      { name: "Sam", color: "#16A34A", canDrive: true, availability: [[[1, 2, 3, 4, 5], 18, 21], [[6], 9, 16]] },
+      { name: "Maya", color: "#DB2777", maxPlannedTaskMinutesPerDay: 45, availability: [[[1, 2, 3, 4, 5], 15.5, 19.5], [[0, 6], 10, 17]] },
+      { name: "Leo", color: "#EA580C", maxPlannedTaskMinutesPerDay: 30, availability: [[[1, 2, 3, 4, 5], 15.5, 19], [[0, 6], 10, 17]] },
     ],
+    // Fictional addresses; coordinates are real Chicago-area geometry so drive times are plausible.
+    places: [
+      { key: "home", name: "Home", kind: "home", lat: 41.9, lng: -87.65, address: "1200 W Example Ave" },
+      { key: "park", name: "Eastside Park", kind: "activity", lat: 41.94, lng: -87.65, arrivalBufferMinutes: 8 },
+      { key: "westview", name: "Westview HS", kind: "school", lat: 41.91, lng: -87.72, arrivalBufferMinutes: 10 },
+      { key: "ymca", name: "YMCA", kind: "activity", lat: 41.885, lng: -87.64 },
+      { key: "peds", name: "Maple Pediatrics", kind: "other", lat: 41.92, lng: -87.66, arrivalBufferMinutes: 10 },
+      { key: "target", name: "Target — Clark St", kind: "store", lat: 41.943, lng: -87.652, hours: [[[0, 1, 2, 3, 4, 5, 6], 8, 22]] },
+      { key: "hardware", name: "Ace Hardware", kind: "store", lat: 41.945, lng: -87.648, hours: [[[1, 2, 3, 4, 5, 6], 8, 20], [[0], 9, 18]] },
+      { key: "goodwill", name: "Goodwill donation center", kind: "store", lat: 41.86, lng: -87.65, hours: [[[1, 2, 3, 4, 5, 6], 9, 19], [[0], 10, 18]] },
+    ],
+    shoppingListPlaces: { target_run: "target" },
     users: [
       { email: "alex@family.test", role: "owner", participant: "Alex" },
       { email: "sam@family.test", role: "member", participant: "Sam" },
@@ -68,10 +117,10 @@ const workspaces: SeedWorkspace[] = [
     sourceName: "Seed sample events",
     defaultParticipant: "Maya",
     events: [
-      { title: "U12 Soccer Practice", tagKey: "practice", participant: "Maya", dayOffset: 1, startHourUtc: 22, durationMinutes: 90, location: "Eastside Park Field 3" },
-      { title: "U12 Soccer vs. Westview", tagKey: "game", participant: "Maya", dayOffset: 3, startHourUtc: 15, durationMinutes: 90, location: "Westview HS" },
-      { title: "Swim Practice", tagKey: "practice", participant: null, dayOffset: 2, startHourUtc: 23, durationMinutes: 60, location: "YMCA" },
-      { title: "Leo — Well-child checkup", tagKey: "medical", participant: "Leo", dayOffset: 4, startHourUtc: 14, durationMinutes: 45, location: "Maple Pediatrics" },
+      { title: "U12 Soccer Practice", tagKey: "practice", participant: "Maya", dayOffset: 1, startHourUtc: 22, durationMinutes: 90, location: "Eastside Park Field 3", place: "park", driver: "Alex" },
+      { title: "U12 Soccer vs. Westview", tagKey: "game", participant: "Maya", dayOffset: 3, startHourUtc: 15, durationMinutes: 90, location: "Westview HS", place: "westview", driver: "Sam" },
+      { title: "Swim Practice", tagKey: "practice", participant: null, dayOffset: 2, startHourUtc: 23, durationMinutes: 60, location: "YMCA", place: "ymca" },
+      { title: "Leo — Well-child checkup", tagKey: "medical", participant: "Leo", dayOffset: 4, startHourUtc: 14, durationMinutes: 45, location: "Maple Pediatrics", place: "peds", driver: "Sam" },
       { title: "Early dismissal", tagKey: "school", participant: null, dayOffset: 5, startHourUtc: 18, durationMinutes: 30 },
       { title: "Neighborhood block party", tagKey: null, participant: null, dayOffset: 6, startHourUtc: 21, durationMinutes: 180 },
     ],
@@ -93,13 +142,17 @@ const workspaces: SeedWorkspace[] = [
     },
     tasks: {
       honey_do: [
-        { title: "Fix squeaky back door hinge", participant: "Alex", priority: "low" },
-        { title: "Patch drywall in hallway", participant: "Sam", dueInDays: 10 },
-        { title: "Hang shelves in Maya's room", priority: "normal" },
+        { title: "Fix squeaky back door hinge", participant: "Alex", priority: "low", estimatedMinutes: 20 },
+        { title: "Patch drywall in hallway", participant: "Sam", dueInDays: 10, estimatedMinutes: 90 },
+        { title: "Hang shelves in Maya's room", priority: "normal", estimatedMinutes: 60 },
+        { title: "Drop donations at Goodwill", priority: "normal", estimatedMinutes: 20, location: { errand: "goodwill" } },
+        { title: "Pick up paint samples", participant: "Alex", priority: "low", estimatedMinutes: 15, location: { errand: "hardware" } },
+        { title: "Call about gutter quote", priority: "high", estimatedMinutes: 15, location: "anywhere" },
+        { title: "Replace garage door opener battery" }, // no estimate yet → organizer asks for one
       ],
       chores: [
-        { title: "Take out trash & recycling", participant: "Leo", dueInDays: 1 },
-        { title: "Unload dishwasher", participant: "Maya", dueInDays: 0 },
+        { title: "Take out trash & recycling", participant: "Leo", dueInDays: 1, estimatedMinutes: 10 },
+        { title: "Unload dishwasher", participant: "Maya", dueInDays: 0, estimatedMinutes: 15 },
       ],
     },
     goals: [
@@ -306,10 +359,36 @@ async function main() {
 
     const participantIdByName = new Map<string, string>();
     for (const p of spec.participants) {
-      const row = await prisma.participant.create({ data: { workspaceId: workspace.id, ...p } });
+      const { availability: _availability, ...fields } = p;
+      const row = await prisma.participant.create({ data: { workspaceId: workspace.id, ...fields } });
       participantIdByName.set(p.name, row.id);
     }
     const pid = (name: string | null) => (name ? participantIdByName.get(name)! : null);
+
+    const placeIdByKey = new Map<string, string>();
+    for (const { key, lat, lng, hours, ...place } of spec.places ?? []) {
+      const openingHours = hours?.flatMap(([days, from, to]) =>
+        days.map((dayOfWeek) => ({ dayOfWeek, startMinute: from * 60, endMinute: to * 60 })),
+      );
+      const row = await prisma.place.create({
+        data: { workspaceId: workspace.id, latitude: lat, longitude: lng, openingHours, ...place },
+      });
+      placeIdByKey.set(key, row.id);
+    }
+    const placeId = (key: string | undefined) => (key ? placeIdByKey.get(key)! : null);
+    for (const p of spec.participants) {
+      await prisma.participant.update({
+        where: { id: pid(p.name)! },
+        data: {
+          homePlaceId: placeId(spec.places?.find((x) => x.kind === "home")?.key),
+          availability: {
+            create: (p.availability ?? []).flatMap(([days, from, to]) =>
+              days.map((dayOfWeek) => ({ dayOfWeek, startMinute: from * 60, endMinute: to * 60 })),
+            ),
+          },
+        },
+      });
+    }
 
     for (const u of spec.users) {
       await prisma.user.create({
@@ -350,6 +429,8 @@ async function main() {
           startTime,
           endTime: new Date(startTime.getTime() + e.durationMinutes * 60_000),
           location: e.location ?? null,
+          placeId: placeId(e.place),
+          driverParticipantId: pid(e.driver ?? null),
           rawSourceData: { seeded: true } as Prisma.InputJsonValue,
         };
       }),
@@ -361,6 +442,8 @@ async function main() {
 
     const shoppingLists = await prisma.shoppingList.findMany({ where: { workspaceId: workspace.id } });
     for (const list of shoppingLists) {
+      const storeKey = spec.shoppingListPlaces?.[list.key!];
+      if (storeKey) await prisma.shoppingList.update({ where: { id: list.id }, data: { placeId: placeId(storeKey) } });
       await prisma.shoppingItem.createMany({
         data: (spec.shopping[list.key!] ?? []).map(({ addedBy, ...item }, i) => ({
           shoppingListId: list.id,
@@ -382,6 +465,9 @@ async function main() {
           priority: t.priority ?? "normal",
           assignedParticipantId: pid(t.participant ?? null),
           dueAt: t.dueInDays === undefined ? null : atDayOffset(t.dueInDays, 23),
+          estimatedMinutes: t.estimatedMinutes ?? null,
+          locationKind: typeof t.location === "object" ? "errand" : (t.location ?? "home"),
+          placeId: typeof t.location === "object" ? placeId(t.location.errand) : null,
           createdByUserId: ownerId,
         })),
       });
