@@ -1,0 +1,38 @@
+{
+  "vertical": "family",
+  "labels": {
+    "workspace": "Family",
+    "participant": "Family member",
+    "participantPlural": "Family members",
+    "contact": "Contact"
+  },
+  "eventTags": [
+    { "key": "practice", "label": "Practice", "color": "#22C55E" },
+    { "key": "game", "label": "Game", "color": "#F97316" },
+    { "key": "school", "label": "School", "color": "#3B82F6" },
+    { "key": "medical", "label": "Medical", "color": "#EF4444" },
+    { "key": "birthday", "label": "Birthday / party", "color": "#EC4899" },
+    { "key": "activity", "label": "Activity", "color": "#A855F7" }
+  ],
+  "contactRoles": ["coach", "teacher", "doctor", "dentist", "babysitter", "parent", "other"],
+  "automationRules": [
+    {
+      "tagKey": "game",
+      "timingOffsetMinutes": 1440,
+      "actionType": "create_reminder",
+      "actionPayload": { "titleTemplate": "Pack uniform & gear for {{title}}" }
+    },
+    {
+      "tagKey": "medical",
+      "timingOffsetMinutes": 2880,
+      "actionType": "create_reminder",
+      "actionPayload": { "titleTemplate": "Confirm appointment: {{title}}" }
+    },
+    {
+      "tagKey": "practice",
+      "timingOffsetMinutes": 720,
+      "actionType": "flag_unassigned_task",
+      "actionPayload": { "titleTemplate": "Who's driving to {{title}}?" }
+    }
+  ]
+}

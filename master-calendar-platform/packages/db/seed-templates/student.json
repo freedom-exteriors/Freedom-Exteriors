@@ -1,0 +1,38 @@
+{
+  "vertical": "student",
+  "labels": {
+    "workspace": "My calendar",
+    "participant": "Person",
+    "participantPlural": "People",
+    "contact": "Contact"
+  },
+  "eventTags": [
+    { "key": "class", "label": "Class", "color": "#3B82F6" },
+    { "key": "assignment", "label": "Assignment due", "color": "#F59E0B" },
+    { "key": "exam", "label": "Exam", "color": "#EF4444" },
+    { "key": "study_group", "label": "Study group", "color": "#22C55E" },
+    { "key": "office_hours", "label": "Office hours", "color": "#14B8A6" },
+    { "key": "extracurricular", "label": "Extracurricular", "color": "#A855F7" }
+  ],
+  "contactRoles": ["professor", "teacher", "advisor", "tutor", "TA", "coach", "classmate", "other"],
+  "automationRules": [
+    {
+      "tagKey": "exam",
+      "timingOffsetMinutes": 4320,
+      "actionType": "create_reminder",
+      "actionPayload": { "titleTemplate": "Start studying for {{title}}" }
+    },
+    {
+      "tagKey": "assignment",
+      "timingOffsetMinutes": 1440,
+      "actionType": "create_reminder",
+      "actionPayload": { "titleTemplate": "Finish & submit: {{title}}" }
+    },
+    {
+      "tagKey": "study_group",
+      "timingOffsetMinutes": 1440,
+      "actionType": "flag_unassigned_task",
+      "actionPayload": { "titleTemplate": "Who's attending {{title}}?" }
+    }
+  ]
+}

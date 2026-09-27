@@ -1,0 +1,21 @@
+{
+  "name": "master-calendar-platform",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "db:generate": "npm run generate -w @mcp/db",
+    "db:migrate": "npm run migrate:dev -w @mcp/db",
+    "db:deploy": "npm run migrate:deploy -w @mcp/db",
+    "db:seed": "npm run seed -w @mcp/db",
+    "db:reset": "npm run reset -w @mcp/db",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=20.19"
+  }
+}

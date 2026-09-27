@@ -1,0 +1,264 @@
+// Master Calendar Platform — one engine, three verticals (family / student / business).
+// Nothing in the engine branches on `Workspace.vertical`; only seed templates and UI copy do.
+// All DateTime columns are timestamptz and hold UTC.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ───────────────────────── Workspaces & auth ─────────────────────────
+
+enum WorkspaceVertical {
+  family
+  student
+  business
+}
+
+model Workspace {
+  id                  String                  @id @default(uuid()) @db.Uuid // random v4 — doubles as the unguessable wall-display URL segment (v1 only)
+  name                String
+  vertical            WorkspaceVertical
+  participants        Participant[]
+  contacts            Contact[]
+  calendarSources     CalendarSource[]
+  automationRules     AutomationRule[]
+  tasks               Task[]
+  eventTagDefinitions EventTagDefinition[]
+  uploadedSchedules   UploadedScheduleImage[]
+  memberships         WorkspaceMembership[]
+  createdAt           DateTime                @default(now()) @db.Timestamptz(3)
+}
+
+model User {
+  id           String                @id @default(uuid()) @db.Uuid
+  email        String                @unique // stored lowercased by the app
+  passwordHash String // argon2id
+  memberships  WorkspaceMembership[]
+  sessions     Session[]
+  createdAt    DateTime              @default(now()) @db.Timestamptz(3)
+}
+
+// Server-side session store. `id` is the SHA-256 of the session token handed to the
+// client, so a DB leak doesn't yield usable session tokens.
+model Session {
+  id        String   @id
+  userId    String   @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([userId])
+}
+
+enum MembershipRole {
+  owner
+  member
+  viewer
+}
+
+// The authorization boundary: every API query is scoped through the caller's memberships.
+model WorkspaceMembership {
+  id            String         @id @default(uuid()) @db.Uuid
+  userId        String         @db.Uuid
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspaceId   String         @db.Uuid
+  workspace     Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  participantId String?        @unique @db.Uuid // the Participant this login "is", if any — at most one login per participant
+  participant   Participant?   @relation(fields: [participantId], references: [id], onDelete: SetNull)
+  role          MembershipRole
+  createdAt     DateTime       @default(now()) @db.Timestamptz(3)
+
+  @@unique([userId, workspaceId])
+  @@index([workspaceId])
+}
+
+// ───────────────────────── People ─────────────────────────
+
+model Participant {
+  id                String               @id @default(uuid()) @db.Uuid
+  workspaceId       String               @db.Uuid
+  workspace         Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name              String
+  color             String // hex, e.g. "#3B82F6"
+  events            Event[]
+  assignedTasks     Task[]               @relation("AssignedTasks")
+  defaultForSources CalendarSource[]     @relation("DefaultParticipant")
+  membership        WorkspaceMembership?
+  createdAt         DateTime             @default(now()) @db.Timestamptz(3)
+
+  @@index([workspaceId])
+}
+
+model Contact {
+  id           String         @id @default(uuid()) @db.Uuid
+  workspaceId  String         @db.Uuid
+  workspace    Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name         String
+  role         String // free text; suggested values come from the vertical's seed template
+  organization String?
+  phone        String?
+  email        String?
+  events       EventContact[]
+  createdAt    DateTime       @default(now()) @db.Timestamptz(3)
+
+  @@index([workspaceId])
+}
+
+// ───────────────────────── Calendar sources & events ─────────────────────────
+
+enum CalendarSourceType {
+  google
+  caldav
+  calendly
+  ics_feed
+  photo_extraction // synthetic source attributing events confirmed from an uploaded photo
+}
+
+model CalendarSource {
+  id                   String             @id @default(uuid()) @db.Uuid
+  workspaceId          String             @db.Uuid
+  workspace            Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name                 String? // display label, e.g. "U12 Soccer (SportsEngine)"
+  defaultParticipantId String?            @db.Uuid
+  defaultParticipant   Participant?       @relation("DefaultParticipant", fields: [defaultParticipantId], references: [id], onDelete: SetNull)
+  type                 CalendarSourceType
+  feedUrl              String?
+  // AES-256-GCM ciphertext (app-layer, key from env) — never plaintext.
+  oauthAccessTokenEnc  Bytes?
+  oauthRefreshTokenEnc Bytes?
+  tokenExpiresAt       DateTime?          @db.Timestamptz(3)
+  feedUsernameEnc      Bytes?
+  feedPasswordEnc      Bytes?
+  lastSyncedAt         DateTime?          @db.Timestamptz(3)
+  createdAt            DateTime           @default(now()) @db.Timestamptz(3)
+  events               Event[]
+
+  @@index([workspaceId])
+}
+
+model EventTagDefinition {
+  id              String           @id @default(uuid()) @db.Uuid
+  workspaceId     String           @db.Uuid
+  workspace       Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  key             String // stable identifier referenced by automation rules, e.g. "practice"
+  label           String
+  color           String?
+  createdAt       DateTime         @default(now()) @db.Timestamptz(3)
+  events          Event[]
+  automationRules AutomationRule[]
+
+  @@unique([workspaceId, key])
+}
+
+model Event {
+  id                   String              @id @default(uuid()) @db.Uuid
+  calendarSourceId     String              @db.Uuid
+  calendarSource       CalendarSource      @relation(fields: [calendarSourceId], references: [id], onDelete: Cascade)
+  participantId        String?             @db.Uuid // null = unassigned until claimed
+  participant          Participant?        @relation(fields: [participantId], references: [id], onDelete: SetNull)
+  eventTagId           String?             @db.Uuid // null = untagged
+  eventTag             EventTagDefinition? @relation(fields: [eventTagId], references: [id], onDelete: SetNull)
+  externalUid          String
+  // "" for non-recurring events (NOT null): Postgres treats NULLs as distinct in unique
+  // constraints, so a nullable column here would let the upsert key silently duplicate
+  // every non-recurring event on each sync. Recurring instances use the instance's
+  // original start (RECURRENCE-ID / originalStartTime) as an ISO-8601 UTC string.
+  externalRecurrenceId String              @default("")
+  title                String
+  startTime            DateTime            @db.Timestamptz(3)
+  endTime              DateTime            @db.Timestamptz(3)
+  allDay               Boolean             @default(false)
+  location             String?
+  rawSourceData        Json
+  contacts             EventContact[]
+  tasks                Task[]
+  createdAt            DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt            DateTime            @updatedAt @db.Timestamptz(3)
+
+  @@unique([calendarSourceId, externalUid, externalRecurrenceId])
+  @@index([calendarSourceId, startTime])
+  @@index([startTime])
+}
+
+model EventContact {
+  eventId   String  @db.Uuid
+  contactId String  @db.Uuid
+  event     Event   @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@id([eventId, contactId])
+}
+
+// ───────────────────────── Automation & tasks ─────────────────────────
+
+enum ActionType {
+  create_reminder
+  flag_unassigned_task
+}
+
+model AutomationRule {
+  id                  String             @id @default(uuid()) @db.Uuid
+  workspaceId         String             @db.Uuid
+  workspace           Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  eventTagId          String             @db.Uuid
+  eventTag            EventTagDefinition @relation(fields: [eventTagId], references: [id], onDelete: Cascade)
+  timingOffsetMinutes Int // minutes before event start the task becomes due (negative = after)
+  actionType          ActionType
+  actionPayload       Json // e.g. { "titleTemplate": "Pack gear for {{title}}" }
+  enabled             Boolean            @default(true)
+  tasks               Task[]
+  createdAt           DateTime           @default(now()) @db.Timestamptz(3)
+
+  @@index([workspaceId])
+}
+
+model Task {
+  id                    String          @id @default(uuid()) @db.Uuid
+  workspaceId           String          @db.Uuid
+  workspace             Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  eventId               String?         @db.Uuid
+  event                 Event?          @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  // Set when generated by the rule engine; with eventId it makes the scheduled job idempotent.
+  automationRuleId      String?         @db.Uuid
+  automationRule        AutomationRule? @relation(fields: [automationRuleId], references: [id], onDelete: SetNull)
+  assignedParticipantId String?         @db.Uuid
+  assignedParticipant   Participant?    @relation("AssignedTasks", fields: [assignedParticipantId], references: [id], onDelete: SetNull)
+  title                 String
+  dueAt                 DateTime?       @db.Timestamptz(3)
+  completedAt           DateTime?       @db.Timestamptz(3)
+  createdAt             DateTime        @default(now()) @db.Timestamptz(3)
+
+  @@unique([automationRuleId, eventId])
+  @@index([workspaceId, completedAt])
+}
+
+// ───────────────────────── Photo extraction ─────────────────────────
+
+enum ExtractionStatus {
+  pending
+  processing
+  completed
+  failed
+}
+
+model UploadedScheduleImage {
+  id              String           @id @default(uuid()) @db.Uuid
+  workspaceId     String           @db.Uuid
+  workspace       Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  // Object path inside the private Supabase Storage bucket (served via short-lived signed
+  // URLs) — not a public URL, since these photos are often kids' schedules / client data.
+  storagePath     String
+  status          ExtractionStatus @default(pending)
+  errorMessage    String?
+  // Candidate events awaiting human confirmation — NOT Event rows yet.
+  extractedEvents Json?
+  createdAt       DateTime         @default(now()) @db.Timestamptz(3)
+
+  @@index([workspaceId])
+}

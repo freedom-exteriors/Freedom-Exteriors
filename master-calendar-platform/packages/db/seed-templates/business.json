@@ -1,0 +1,37 @@
+{
+  "vertical": "business",
+  "labels": {
+    "workspace": "Business",
+    "participant": "Team member",
+    "participantPlural": "Team",
+    "contact": "Contact"
+  },
+  "eventTags": [
+    { "key": "client_meeting", "label": "Client meeting", "color": "#3B82F6" },
+    { "key": "invoice_due", "label": "Invoice due", "color": "#F59E0B" },
+    { "key": "staff_shift", "label": "Staff shift", "color": "#22C55E" },
+    { "key": "internal_meeting", "label": "Internal meeting", "color": "#64748B" },
+    { "key": "deadline", "label": "Deadline", "color": "#EF4444" }
+  ],
+  "contactRoles": ["client", "vendor", "contractor", "accountant", "supplier", "other"],
+  "automationRules": [
+    {
+      "tagKey": "invoice_due",
+      "timingOffsetMinutes": 4320,
+      "actionType": "create_reminder",
+      "actionPayload": { "titleTemplate": "Send reminder: {{title}}" }
+    },
+    {
+      "tagKey": "client_meeting",
+      "timingOffsetMinutes": 1440,
+      "actionType": "create_reminder",
+      "actionPayload": { "titleTemplate": "Prep agenda for {{title}}" }
+    },
+    {
+      "tagKey": "staff_shift",
+      "timingOffsetMinutes": 2880,
+      "actionType": "flag_unassigned_task",
+      "actionPayload": { "titleTemplate": "Unstaffed shift: {{title}}" }
+    }
+  ]
+}
