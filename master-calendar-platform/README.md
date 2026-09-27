@@ -6,7 +6,8 @@ on: shared grocery lists, honey-do lists, short- and long-term goals, and season
 reminders. Families can also link up in shared **circles** to plan carpools, team snacks
 and trips. The same engine serves three verticals: **family**,
 **student**, and **small business**. The verticals differ only in seed data and UI labels
-(`apps/api/                   Fastify API (auth, workspaces, members, invites so far)
+(`apps/api/                   Fastify API + worker (auth, workspaces, invites, calendar feeds so far)
+  src/ingestion/            ICS parser, SSRF-safe fetcher, sync engine + scheduler
 packages/db/seed-templates/`). The engine never branches on vertical.
 
 Stack: npm workspaces · Fastify + TypeScript API · Prisma 7 on Supabase-hosted Postgres ·
@@ -18,8 +19,8 @@ React web app · Supabase Storage for photos · Vercel (web) + Railway (API + cr
 |---|---|---|
 | 1 | DB schema + migrations, templates, dev seed (calendar, lists, goals, reminders, circles) | ✅ done |
 | 2 | Auth (email + password, DB sessions, membership-scoped middleware) + invites (second parent, join a circle) | ✅ done |
-| 3 | ICS feed parser + subscription job | next |
-| 4 | Google Calendar OAuth + sync | |
+| 3 | ICS feed parser + subscription job | ✅ done |
+| 4 | Google Calendar OAuth + sync | next |
 | 5 | Unified event query endpoint (incl. circle events assigned to your household) | |
 | 6 | Lists & goals API: shopping lists, task lists, goals with milestones | *new* |
 | 7 | Photo extraction → review → confirm | |
@@ -39,6 +40,7 @@ npm run db:deploy                                   # apply migrations
 npm run db:seed                                     # one workspace per vertical
 npm test                                            # db, planner and API tests
 npm run dev -w @mcp/api                             # API on :3001
+npm run worker -w @mcp/api                          # background jobs (feed sync every minute)
 ```
 
 `npm run db:migrate` creates a new migration after you edit `schema.prisma`.
@@ -118,6 +120,65 @@ cookie won't be sent. Plan: Vercel rewrites `/api/*` to the Railway API, so the 
 only ever talks to one origin, and the Vite dev server proxies the same way locally.
 **Not built yet (fast-follows):** password reset and email verification (both need an
 email sender), magic links, and "sign out everywhere".
+
+## Calendar feeds (ICS) — step 3
+
+Paste any "subscribe" / iCal / webcal link: SportsEngine, TeamSnap, ParentSquare, a
+school district, Outlook or Apple "publish calendar", Google "secret address". The same
+code path serves all of them; nothing is special-cased or scraped.
+
+| Endpoint | Who |
+|---|---|
+| `GET /workspaces/:id/calendar-sources` | viewer+ (feed URLs are masked to `host/…`, since many embed a private token) |
+| `POST /workspaces/:id/calendar-sources` `{ feedUrl, name?, defaultParticipantId?, defaultEventTagId?, username?, password? }` | member+; **runs the first sync immediately**, so a bad link fails with a readable message ("That link is a web page, not a calendar feed. Look for Subscribe / iCal / .ics") instead of silently later |
+| `PATCH …/:sourceId` `{ name?, defaultParticipantId?, defaultEventTagId?, applyToExisting? }` | member+; "all events from this feed are Maya's". With `applyToExisting` it fills only unassigned/untagged events |
+| `DELETE …/:sourceId` | member+ (its events go too) |
+| `POST …/:sourceId/sync` | member+; at most once per 5 min |
+
+**Parsing** (`ical.js`):
+- Recurring series are expanded into one row per occurrence, including skipped dates
+  (EXDATE), single moved occurrences (RECURRENCE-ID) and cancelled ones.
+- A moved practice keeps its original key, so it's **updated in place**. Anything a
+  person set on it (who's going, driver, tag) sticks.
+- Time zones:
+  - IANA zones (e.g. America/Chicago) are resolved with the runtime's time-zone
+    database, so they're correct across daylight-saving changes.
+  - Outlook-style names ("Central Standard Time") use the feed's own time-zone
+    definitions.
+  - Floating times and all-day dates use the workspace's zone.
+- A test fixture exercises all of the above, including a series that crosses the
+  November DST change.
+
+**Sync rules:**
+- **Who owns what:** the feed owns title, time and location. People own who it's for,
+  tag, driver and place. Sync only sets participant/tag when *creating* an event (from
+  the source's defaults) and never overwrites them. If the location text changes, the
+  geocoded place is cleared for re-lookup.
+- **No duplicates:** upserts use the unique key.
+- **Deletions:** events removed upstream are deleted inside the window (−30/+365 days).
+  Older history is left alone.
+- **Empty feeds:** a feed that suddenly comes back **empty never wipes** the calendar;
+  it's flagged instead.
+- **Polling:** every 30 min + jitter (never faster, per the SportsEngine note).
+  Conditional GET (ETag / Last-Modified) makes unchanged feeds cheap. A failure backs off
+  60 min and keeps existing events. The error is shown on the source ("That calendar
+  link no longer exists").
+- **Workers:** each run claims a source before syncing it, so two workers never sync the
+  same feed.
+
+**Security:**
+- **SSRF:** feed URLs are user input, so the fetcher only allows http(s) (webcal → https).
+  It refuses private, loopback, link-local and cloud-metadata addresses, both as IP
+  literals *and* in DNS answers at connect time (defeats DNS rebinding). Redirects are
+  re-checked, limited to 3, and never forward credentials to another host. There's a
+  20 s timeout and a 5 MB cap.
+- **Credentials:** feed usernames/passwords are **AES-256-GCM encrypted** at rest
+  (`CREDENTIALS_ENCRYPTION_KEY`). Tampering or a wrong key fails loudly.
+- **Cross-workspace ids:** `lib/scope.ts` rejects participant and tag ids from another
+  workspace.
+
+**Worker:** `npm run worker -w @mcp/api` (a second Railway service). It runs due syncs
+every minute; later steps add automation, reminders and leave-by alerts to the same loop.
 
 ## Home hub: lists, goals, reminders
 
@@ -297,11 +358,12 @@ The brief's schema is used as written, except for these changes:
 Suggested `Contact.role` values are template data served at runtime, not a table.
 `Contact.role` stays free text.
 
-### Known limitation, deferred to the API layer
+### Known limitation, handled in the API layer
 
 `Event` has no `workspaceId`; it belongs to a workspace through `calendarSource`. The DB
 does not stop an event's `participantId` or `eventTagId` from pointing at a row in a
-*different* workspace. The API's write paths have to enforce this (step 2 onward).
+*different* workspace. The API enforces this on every write path
+(`apps/api/src/lib/scope.ts`).
 
 ## Auth library decision (for step 2)
 

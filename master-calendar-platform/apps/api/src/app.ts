@@ -8,15 +8,26 @@ import { registerAuth } from "./auth/plugin.js";
 import { authRoutes } from "./auth/routes.js";
 import { workspaceRoutes } from "./routes/workspaces.js";
 import { inviteRoutes } from "./routes/invites.js";
+import { calendarSourceRoutes } from "./routes/calendar-sources.js";
+import { Crypter } from "./lib/crypto.js";
+import { fetchFeed, type FeedFetcher } from "./ingestion/safe-fetch.js";
 
 declare module "fastify" {
   interface FastifyInstance {
     prisma: PrismaClient;
     config: AppConfig;
+    feedFetcher: FeedFetcher;
+    crypter: Crypter | null;
   }
 }
 
-export async function buildApp(opts: { prisma: PrismaClient; config: AppConfig; logger?: boolean }): Promise<FastifyInstance> {
+export async function buildApp(opts: {
+  prisma: PrismaClient;
+  config: AppConfig;
+  logger?: boolean;
+  /** Injected in tests; defaults to the SSRF-safe fetcher. */
+  feedFetcher?: FeedFetcher;
+}): Promise<FastifyInstance> {
   const app = Fastify({
     logger: opts.logger ?? false,
     trustProxy: true, // Railway / Vercel proxy: rate limits key on the real client IP
@@ -24,6 +35,8 @@ export async function buildApp(opts: { prisma: PrismaClient; config: AppConfig; 
   });
   app.decorate("prisma", opts.prisma);
   app.decorate("config", opts.config);
+  app.decorate("feedFetcher", opts.feedFetcher ?? fetchFeed);
+  app.decorate("crypter", opts.config.credentialsKey ? new Crypter(opts.config.credentialsKey) : null);
 
   await app.register(cookie);
   await app.register(rateLimit, { global: false });
@@ -46,5 +59,6 @@ export async function buildApp(opts: { prisma: PrismaClient; config: AppConfig; 
   await app.register(authRoutes);
   await app.register(workspaceRoutes);
   await app.register(inviteRoutes);
+  await app.register(calendarSourceRoutes);
   return app;
 }

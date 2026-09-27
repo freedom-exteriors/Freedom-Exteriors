@@ -8,6 +8,7 @@ const schema = z.object({
   WEB_ORIGIN: z.string().default("http://localhost:5173"),
   /** Public base URL of the web app, used to build invite links. */
   PUBLIC_WEB_URL: z.string().optional(),
+  CREDENTIALS_ENCRYPTION_KEY: z.string().optional(),
   AUTH_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().positive().default(10),
 });
 
@@ -20,6 +21,8 @@ export interface AppConfig {
   cookieSecure: boolean;
   /** Per-IP limit on signup/login attempts per minute. */
   authRateLimitMax: number;
+  /** base64 32-byte AES key for *Enc columns; null disables password-protected feeds. */
+  credentialsKey: string | null;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -33,5 +36,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     publicWebUrl: c.PUBLIC_WEB_URL ?? allowedOrigins[0]!,
     cookieSecure: c.NODE_ENV === "production",
     authRateLimitMax: c.AUTH_RATE_LIMIT_PER_MINUTE,
+    credentialsKey: c.CREDENTIALS_ENCRYPTION_KEY || null,
   };
 }

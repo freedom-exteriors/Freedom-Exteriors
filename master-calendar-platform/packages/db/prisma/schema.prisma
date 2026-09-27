@@ -188,37 +188,50 @@ enum CalendarSourceType {
 }
 
 model CalendarSource {
-  id                   String             @id @default(uuid()) @db.Uuid
-  workspaceId          String             @db.Uuid
-  workspace            Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  id                   String              @id @default(uuid()) @db.Uuid
+  workspaceId          String              @db.Uuid
+  workspace            Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   name                 String? // display label, e.g. "U12 Soccer (SportsEngine)"
-  defaultParticipantId String?            @db.Uuid
-  defaultParticipant   Participant?       @relation("DefaultParticipant", fields: [defaultParticipantId], references: [id], onDelete: SetNull)
+  defaultParticipantId String?             @db.Uuid
+  defaultParticipant   Participant?        @relation("DefaultParticipant", fields: [defaultParticipantId], references: [id], onDelete: SetNull)
   type                 CalendarSourceType
   feedUrl              String?
   // AES-256-GCM ciphertext (app-layer, key from env) — never plaintext.
   oauthAccessTokenEnc  Bytes?
   oauthRefreshTokenEnc Bytes?
-  tokenExpiresAt       DateTime?          @db.Timestamptz(3)
+  tokenExpiresAt       DateTime?           @db.Timestamptz(3)
   feedUsernameEnc      Bytes?
   feedPasswordEnc      Bytes?
-  lastSyncedAt         DateTime?          @db.Timestamptz(3)
-  createdAt            DateTime           @default(now()) @db.Timestamptz(3)
+  lastSyncedAt         DateTime?           @db.Timestamptz(3)
+  // ─ Sync job state ─ (feeds are polled at most every 30 min; SportsEngine only
+  // refreshes about that often anyway)
+  nextSyncAt           DateTime?           @db.Timestamptz(3)
+  lastSyncError        String?
+  lastSyncStats        Json? // { created, updated, deleted, skipped }
+  httpEtag             String? // conditional GET: unchanged feeds cost one 304
+  httpLastModified     String?
+  // Tag applied to new events from this feed (e.g. a school feed → "school"). Set by a
+  // person; never inferred. Events keep any tag a person picks later.
+  defaultEventTagId    String?             @db.Uuid
+  defaultEventTag      EventTagDefinition? @relation("SourceDefaultTag", fields: [defaultEventTagId], references: [id], onDelete: SetNull)
+  createdAt            DateTime            @default(now()) @db.Timestamptz(3)
   events               Event[]
 
   @@index([workspaceId])
+  @@index([type, nextSyncAt])
 }
 
 model EventTagDefinition {
-  id              String           @id @default(uuid()) @db.Uuid
-  workspaceId     String           @db.Uuid
-  workspace       Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  key             String // stable identifier referenced by automation rules, e.g. "practice"
-  label           String
-  color           String?
-  createdAt       DateTime         @default(now()) @db.Timestamptz(3)
-  events          Event[]
-  automationRules AutomationRule[]
+  id                String           @id @default(uuid()) @db.Uuid
+  workspaceId       String           @db.Uuid
+  workspace         Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  key               String // stable identifier referenced by automation rules, e.g. "practice"
+  label             String
+  color             String?
+  createdAt         DateTime         @default(now()) @db.Timestamptz(3)
+  events            Event[]
+  automationRules   AutomationRule[]
+  defaultForSources CalendarSource[] @relation("SourceDefaultTag")
 
   @@unique([workspaceId, key])
 }
