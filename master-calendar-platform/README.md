@@ -22,10 +22,10 @@ React web app · Supabase Storage for photos · Vercel (web) + Railway (API + cr
 | 3 | ICS feed parser + subscription job | ✅ done |
 | 4 | Google Calendar OAuth + sync | ✅ done |
 | 5 | Unified event query endpoint (incl. circle events assigned to your household) | ✅ done |
-| 6 | Lists & goals API: shopping lists, task lists, goals with milestones | *new* · next |
-| 7 | Photo extraction → review → confirm | |
+| 6 | Lists & goals API + people/places + schedule-organizer API | ✅ done |
+| 7 | Photo extraction → review → confirm | next |
 | 8 | Scheduled jobs: automation rule engine, seasonal reminders, **leave-by traffic alerts**, notification sender | *expanded* |
-| 8b | **Schedule organizer** API: daily/weekly plan, accept/move suggestions (engine already built in `packages/planner`) | *new* |
+| 8b | ~~Schedule organizer API~~ | folded into step 6 |
 | 9 | Retailer handoff (see below) | *new* |
 | 10 | Dashboard frontend | |
 | 11 | Wall/kiosk route (+ today's chores and the grocery list) | |
@@ -277,6 +277,80 @@ ready to draw:
   `{ participantId?, eventTagId?, driverParticipantId? }` (member+). This is the
   "nullable until claimed" step. It rejects ids from other workspaces and drivers who
   aren't marked `canDrive`. Syncs never overwrite these fields.
+
+## Household hub API — step 6
+
+All under `/workspaces/:id/…`. Reads are viewer+; writes are member+ **except** where a
+list is opened to viewers (`viewerCanAdd`), which is how kids add to Groceries and
+Chores without being able to change anything else.
+
+**Task lists & tasks** (`task-lists`, `tasks`)
+- Lists: create, rename, reorder, archive; each shows an open count.
+- Tasks: filter by list, goal, person, open/done, or `unlisted` (automation output). A
+  task can carry who, due date, priority, notes, time estimate, and location
+  (home / errand at a place / anywhere).
+- **What kids (viewers) can do:**
+  - Add a task to an open list. They can set only the title and notes; parents decide
+    who, when and how important.
+  - Tick off tasks on open lists, and **their own assigned chores** anywhere.
+  - Delete what they themselves added.
+- Completion records who did it ("Maya finished Unload dishwasher").
+
+**Shopping lists** (`shopping-lists`, `…/items`)
+- Items come back in the **store's walking order** from the template (Produce → Dairy →
+  … → uncategorized), with checked items at the bottom and "added by Maya" / "got it:
+  Alex".
+- Adding "milk" when Milk is already on the list merges instead of duplicating. Re-adding
+  a bought **staple** just un-checks it.
+- `clear-checked` removes bought one-offs but keeps staples. `restock-staples` puts
+  every staple back on the list in one tap.
+- `handoff?retailer=amazon|target|walmart`, v1 links:
+  - **Amazon:** an add-to-cart URL for items with a saved ASIN; search links otherwise.
+  - **Target:** product pages (saved TCIN) or search links. You pick Order Pickup or
+    Drive Up in Target's app.
+  - **Walmart:** product (saved item id) or search links.
+  - Kroger/Instacart return `501` until the retailer step.
+  - Product ids are validated before they're ever put into a URL.
+
+**Goals** (`goals`)
+- Goals are short- or long-term, for the household or one person, and can be created
+  with milestones in one call.
+- Progress = completed milestones / total, and milestones are ordinary tasks.
+- Marking a goal achieved stamps `achievedAt`. Deleting a goal removes its milestone
+  tasks, except ones that are also on a list.
+
+**Seasonal reminders** (`recurring-reminders`)
+- Listed soonest first, with `nextDate` computed in the household's time zone. Each can
+  be edited, paused or deleted.
+- Rules are validated (yearly/monthly/weekly RRULEs) and evaluated on *dates*, so no DST
+  edge can shift "Oct 15".
+- The generator that turns them into tasks runs in the worker (step 8).
+
+**People & places** (`participants`, `participants/:id/availability`, `places`)
+- **People:**
+  - A color is picked automatically, distinct from the others.
+  - "Can drive" and a daily cap on planned-task minutes can be set per person.
+  - Free-time windows are replaced as a whole weekly pattern (`PUT`).
+- **Places:**
+  - Given coordinates are used directly; otherwise the address is geocoded (Google
+    Geocoding, biased toward the household's home).
+  - Opening hours are entered as `HH:MM` and constrain errands.
+  - The first **home** place becomes everyone's starting point.
+
+**Schedule organizer** (`plan`, `tasks/:id/schedule`)
+- `POST plan { scope: "day" | "week", date? }` runs `packages/planner` over the
+  household's events, accepted plans and open tasks. It writes **suggestions** onto the
+  tasks and returns what couldn't be placed and why.
+- **Suggestions aren't assignments.** An unassigned to-do suggested for Alex stays
+  unassigned (`scheduledParticipant` = Alex) until someone accepts it; dismissing leaves
+  nobody holding it.
+- `accept`, `move { start, participantId? }`, `dismiss`. Accepted slots are fixed:
+  re-planning only replaces suggestions and plans around accepted ones.
+- `GET plan?start&end` is the agenda (suggested + accepted) for the dashboard.
+- It needs a home place and free hours for at least one person; otherwise it says so
+  plainly.
+
+Also: `PATCH /workspaces/:id { name?, timeZone? }` (owner).
 
 ## Home hub: lists, goals, reminders
 

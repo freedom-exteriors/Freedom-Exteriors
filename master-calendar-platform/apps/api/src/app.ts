@@ -11,6 +11,12 @@ import { inviteRoutes } from "./routes/invites.js";
 import { calendarSourceRoutes } from "./routes/calendar-sources.js";
 import { googleRoutes } from "./routes/google.js";
 import { eventRoutes } from "./routes/events.js";
+import { taskRoutes } from "./routes/tasks.js";
+import { shoppingRoutes } from "./routes/shopping.js";
+import { goalRoutes } from "./routes/goals.js";
+import { peopleRoutes, type Geocoder } from "./routes/people.js";
+import { planRoutes } from "./routes/plan.js";
+import { geocodeAddress } from "@mcp/planner";
 import { HttpGoogleApi, type GoogleApi } from "./integrations/google-api.js";
 import { Crypter } from "./lib/crypto.js";
 import { fetchFeed, type FeedFetcher } from "./ingestion/safe-fetch.js";
@@ -22,6 +28,7 @@ declare module "fastify" {
     feedFetcher: FeedFetcher;
     crypter: Crypter | null;
     google: GoogleApi | null;
+    geocoder: Geocoder | null;
   }
 }
 
@@ -33,6 +40,7 @@ export async function buildApp(opts: {
   feedFetcher?: FeedFetcher;
   /** Injected in tests; defaults to the real client when GOOGLE_* env vars are set. */
   google?: GoogleApi | null;
+  geocoder?: Geocoder | null;
 }): Promise<FastifyInstance> {
   const app = Fastify({
     logger: opts.logger ?? false,
@@ -43,6 +51,11 @@ export async function buildApp(opts: {
   app.decorate("config", opts.config);
   app.decorate("feedFetcher", opts.feedFetcher ?? fetchFeed);
   app.decorate("crypter", opts.config.credentialsKey ? new Crypter(opts.config.credentialsKey) : null);
+  const mapsKey = opts.config.mapsApiKey;
+  app.decorate(
+    "geocoder",
+    opts.geocoder !== undefined ? opts.geocoder : mapsKey ? (address: string, near?: { lat: number; lng: number }) => geocodeAddress(address, mapsKey, { near }) : null,
+  );
   app.decorate("google", opts.google !== undefined ? opts.google : opts.config.google ? new HttpGoogleApi(opts.config.google) : null);
 
   await app.register(cookie);
@@ -69,5 +82,10 @@ export async function buildApp(opts: {
   await app.register(calendarSourceRoutes);
   await app.register(googleRoutes);
   await app.register(eventRoutes);
+  await app.register(taskRoutes);
+  await app.register(shoppingRoutes);
+  await app.register(goalRoutes);
+  await app.register(peopleRoutes);
+  await app.register(planRoutes);
   return app;
 }

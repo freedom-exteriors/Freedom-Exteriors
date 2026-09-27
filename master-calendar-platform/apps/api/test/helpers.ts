@@ -7,6 +7,7 @@ import { buildApp } from "../src/app.js";
 import { loadConfig, type AppConfig } from "../src/config.js";
 import type { FeedFetcher, FeedRequest } from "../src/ingestion/safe-fetch.js";
 import type { GoogleApi } from "../src/integrations/google-api.js";
+import type { Geocoder } from "../src/routes/people.js";
 
 loadEnv({ path: path.resolve(import.meta.dirname, "../../../.env") });
 
@@ -20,7 +21,7 @@ export const TEST_KEY = Buffer.alloc(32, 7).toString("base64");
 
 export async function makeApp(
   overrides: Partial<AppConfig> = {},
-  deps: { feedFetcher?: FeedFetcher; google?: GoogleApi | null } = {},
+  deps: { feedFetcher?: FeedFetcher; google?: GoogleApi | null; geocoder?: Geocoder | null } = {},
 ): Promise<FastifyInstance> {
   const config = {
     ...loadConfig({ ...process.env, NODE_ENV: "test", WEB_ORIGIN: ORIGIN }),
@@ -49,7 +50,7 @@ export class Client {
   cookie: string | null = null;
   constructor(readonly app: FastifyInstance) {}
 
-  async req(method: "GET" | "POST" | "PATCH" | "DELETE", url: string, body?: unknown, headers: Record<string, string> = {}) {
+  async req(method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE", url: string, body?: unknown, headers: Record<string, string> = {}) {
     const res = await this.app.inject({
       method,
       url,
@@ -63,6 +64,7 @@ export class Client {
   get = (url: string) => this.req("GET", url);
   post = (url: string, body?: unknown) => this.req("POST", url, body ?? {});
   patch = (url: string, body?: unknown) => this.req("PATCH", url, body ?? {});
+  put = (url: string, body?: unknown) => this.req("PUT", url, body ?? {});
   del = (url: string) => this.req("DELETE", url);
 
   async signup(name: string, workspace?: { name: string; vertical: "family" | "student" | "business" }) {

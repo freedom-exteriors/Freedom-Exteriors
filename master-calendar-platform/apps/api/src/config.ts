@@ -9,6 +9,7 @@ const schema = z.object({
   /** Public base URL of the web app, used to build invite links. */
   PUBLIC_WEB_URL: z.string().optional(),
   CREDENTIALS_ENCRYPTION_KEY: z.string().optional(),
+  GOOGLE_MAPS_API_KEY: z.string().optional(),
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
   GOOGLE_REDIRECT_URI: z.string().optional(),
@@ -26,6 +27,8 @@ export interface AppConfig {
   authRateLimitMax: number;
   /** base64 32-byte AES key for *Enc columns; null disables password-protected feeds. */
   credentialsKey: string | null;
+  /** Google Maps Platform key (Geocoding + Routes); null disables address lookup and live traffic. */
+  mapsApiKey: string | null;
   /** Google OAuth client; null disables "Connect Google Calendar". */
   google: { clientId: string; clientSecret: string; redirectUri: string } | null;
 }
@@ -42,6 +45,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     cookieSecure: c.NODE_ENV === "production",
     authRateLimitMax: c.AUTH_RATE_LIMIT_PER_MINUTE,
     credentialsKey: c.CREDENTIALS_ENCRYPTION_KEY || null,
+    mapsApiKey: c.GOOGLE_MAPS_API_KEY || null,
     google:
       c.GOOGLE_CLIENT_ID && c.GOOGLE_CLIENT_SECRET && c.GOOGLE_REDIRECT_URI
         ? { clientId: c.GOOGLE_CLIENT_ID, clientSecret: c.GOOGLE_CLIENT_SECRET, redirectUri: c.GOOGLE_REDIRECT_URI }

@@ -89,6 +89,12 @@ export async function workspaceRoutes(app: FastifyInstance) {
     };
   });
 
+  app.patch("/workspaces/:workspaceId", { preHandler: requireWorkspace("owner") }, async (req) => {
+    const body = parse(createBody.pick({ name: true, timeZone: true }).partial(), req.body);
+    const ws = await app.prisma.workspace.update({ where: { id: req.membership!.workspaceId }, data: body });
+    return { id: ws.id, name: ws.name, timeZone: ws.timeZone };
+  });
+
   // ─── Members ───
 
   app.get("/workspaces/:workspaceId/members", { preHandler: requireWorkspace("member") }, async (req) => {
