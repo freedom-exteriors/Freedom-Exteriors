@@ -23,8 +23,8 @@ React web app · Supabase Storage for photos · Vercel (web) + Railway (API + cr
 | 4 | Google Calendar OAuth + sync | ✅ done |
 | 5 | Unified event query endpoint (incl. circle events assigned to your household) | ✅ done |
 | 6 | Lists & goals API + people/places + schedule-organizer API | ✅ done |
-| 7 | Photo extraction → review → confirm | next |
-| 8 | Scheduled jobs: automation rule engine, seasonal reminders, **leave-by traffic alerts**, notification sender | *expanded* |
+| 7 | Photo extraction → review → confirm | ✅ done |
+| 8 | Scheduled jobs: automation rule engine, seasonal reminders, **leave-by traffic alerts**, notification sender | *expanded* · next |
 | 8b | ~~Schedule organizer API~~ | folded into step 6 |
 | 9 | Retailer handoff (see below) | *new* |
 | 10 | Dashboard frontend | |
@@ -351,6 +351,75 @@ Chores without being able to change anything else.
   plainly.
 
 Also: `PATCH /workspaces/:id { name?, timeZone? }` (owner).
+
+## Photo → calendar — step 7
+
+Snap a flyer, schedule, appointment card or shift roster (JPG/PNG/WebP/HEIC, or a PDF).
+Claude reads it into **candidate** events, a person reviews them, and **only confirmed
+candidates become events**. Nothing is ever added automatically.
+
+| Endpoint | Who |
+|---|---|
+| `POST /workspaces/:id/schedule-photos` (multipart `file`; `?wait=true` to block until read) | viewer+: kids can snap the team flyer (30/hour per person) |
+| `GET …/schedule-photos`, `GET …/:photoId` (candidates + notes), `GET …/:photoId/image` | viewer+ |
+| `PATCH …/:photoId/candidates/:candidateId` (title, start, end, allDay, location, participantId, eventTagId) | member+ |
+| `POST …/:photoId/confirm { candidateIds, confirmLowConfidence? }`, `POST …/reject`, `POST …/retry` | member+ |
+| `DELETE …/:photoId` | member+, or whoever uploaded it; confirmed events stay |
+
+**Upload handling:**
+- The file type is checked from its **bytes**, never its name or claimed type.
+- Images get their EXIF rotation applied (phone photos are often stored sideways), are
+  downscaled to 1568 px, and are re-encoded as JPEG. That also **strips EXIF, including
+  GPS location**, before anything is stored.
+- Stored in a **private** Supabase Storage bucket (or `apps/api/.data/photos` in dev) and
+  served back only through the auth-checked `…/image` route.
+
+**The model call** (`extraction/extractor.ts`, `@anthropic-ai/sdk`):
+- Model: `claude-opus-5` (override with `EXTRACTION_MODEL`), adaptive thinking.
+- **Structured outputs** (`output_config.format` JSON schema), so the reply always has
+  the candidate shape. It's validated again with zod on our side anyway.
+- **Server-side refusal fallbacks** (`fallbacks: "default"`, beta
+  `server-side-fallback-2026-07-01`): if a safety classifier misfires on an ordinary
+  image, the request is re-run on Anthropic's recommended fallback model instead of
+  failing.
+- The prompt gets today's date, the household's time zone, people and tag keys, and
+  asks for:
+  - one entry per occurrence ("Tuesdays in October" becomes each date);
+  - local wall-clock times exactly as written;
+  - honest confidence;
+  - the words it read (`sourceText`);
+  - notes on anything assumed.
+- It's told to treat text in the image as data, not instructions.
+- Refusals, truncation, rate limits and malformed output become readable messages ("The
+  photo reader is busy — try again in a minute").
+
+**Turning the model's reply into candidates** (`extraction/candidates.ts`):
+- **Time zones:** the model returns wall-clock times, and *we* convert them in the
+  household's time zone (DST-correct). Models are unreliable with UTC offsets.
+- **Assumptions are written down and shown to the reviewer:** no end time → 1 hour;
+  ends after midnight; no time → all-day; date in the past.
+- **Suggestions:** suggested people and tags are kept only if they match this household's
+  actual people and tag keys.
+- **Low confidence:** candidates under 0.7 confidence are flagged. Confirming one needs
+  `confirmLowConfidence: true`, unless the reviewer edited it (editing counts as
+  reviewing).
+
+**Confirming:**
+- Confirmed candidates become events in the workspace's **"Photo imports"** source
+  (`photo_extraction`), keyed by photo + candidate so they can't be added twice.
+- The events carry the confidence, source text and assumptions.
+- They appear in the unified calendar like any other event.
+- Concurrent reviews are safe: an optimistic lock returns "someone else just changed
+  this" instead of losing an edit.
+
+**Processing:**
+- Extraction runs right after upload.
+- The worker retries uploads that never finished (a crash or deploy mid-read) after 10
+  minutes.
+- Failed reads can be retried.
+
+**Try it on a real image** (one model call, no database):
+`ANTHROPIC_API_KEY=… npm run try:photo -w @mcp/api -- ./flyer.jpg`
 
 ## Home hub: lists, goals, reminders
 

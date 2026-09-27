@@ -8,6 +8,8 @@ import { loadConfig, type AppConfig } from "../src/config.js";
 import type { FeedFetcher, FeedRequest } from "../src/ingestion/safe-fetch.js";
 import type { GoogleApi } from "../src/integrations/google-api.js";
 import type { Geocoder } from "../src/routes/people.js";
+import { MemoryPhotoStore, type PhotoStore } from "../src/extraction/photo-store.js";
+import type { ScheduleExtractor } from "../src/extraction/extractor.js";
 
 loadEnv({ path: path.resolve(import.meta.dirname, "../../../.env") });
 
@@ -21,7 +23,13 @@ export const TEST_KEY = Buffer.alloc(32, 7).toString("base64");
 
 export async function makeApp(
   overrides: Partial<AppConfig> = {},
-  deps: { feedFetcher?: FeedFetcher; google?: GoogleApi | null; geocoder?: Geocoder | null } = {},
+  deps: {
+    feedFetcher?: FeedFetcher;
+    google?: GoogleApi | null;
+    geocoder?: Geocoder | null;
+    photoStore?: PhotoStore;
+    extractor?: ScheduleExtractor | null;
+  } = {},
 ): Promise<FastifyInstance> {
   const config = {
     ...loadConfig({ ...process.env, NODE_ENV: "test", WEB_ORIGIN: ORIGIN }),
@@ -29,7 +37,8 @@ export async function makeApp(
     credentialsKey: TEST_KEY,
     ...overrides,
   };
-  const app = await buildApp({ prisma, config, ...deps });
+  // Tests never touch disk, Supabase or a real model unless they pass their own.
+  const app = await buildApp({ prisma, config, photoStore: new MemoryPhotoStore(), extractor: null, ...deps });
   apps.push(app);
   return app;
 }

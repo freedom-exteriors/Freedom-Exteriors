@@ -17,6 +17,10 @@ import { goalRoutes } from "./routes/goals.js";
 import { peopleRoutes, type Geocoder } from "./routes/people.js";
 import { planRoutes } from "./routes/plan.js";
 import { geocodeAddress } from "@mcp/planner";
+import multipart from "@fastify/multipart";
+import { photoRoutes } from "./routes/photos.js";
+import { LocalDiskPhotoStore, SupabasePhotoStore, type PhotoStore } from "./extraction/photo-store.js";
+import { ClaudeScheduleExtractor, type ScheduleExtractor } from "./extraction/extractor.js";
 import { HttpGoogleApi, type GoogleApi } from "./integrations/google-api.js";
 import { Crypter } from "./lib/crypto.js";
 import { fetchFeed, type FeedFetcher } from "./ingestion/safe-fetch.js";
@@ -29,6 +33,8 @@ declare module "fastify" {
     crypter: Crypter | null;
     google: GoogleApi | null;
     geocoder: Geocoder | null;
+    photoStore: PhotoStore;
+    extractor: ScheduleExtractor | null;
   }
 }
 
@@ -41,6 +47,8 @@ export async function buildApp(opts: {
   /** Injected in tests; defaults to the real client when GOOGLE_* env vars are set. */
   google?: GoogleApi | null;
   geocoder?: Geocoder | null;
+  photoStore?: PhotoStore;
+  extractor?: ScheduleExtractor | null;
 }): Promise<FastifyInstance> {
   const app = Fastify({
     logger: opts.logger ?? false,
@@ -51,6 +59,11 @@ export async function buildApp(opts: {
   app.decorate("config", opts.config);
   app.decorate("feedFetcher", opts.feedFetcher ?? fetchFeed);
   app.decorate("crypter", opts.config.credentialsKey ? new Crypter(opts.config.credentialsKey) : null);
+  app.decorate("photoStore", opts.photoStore ?? photoStoreFor(opts.config));
+  app.decorate(
+    "extractor",
+    opts.extractor !== undefined ? opts.extractor : opts.config.extractionModel ? new ClaudeScheduleExtractor(opts.config.extractionModel) : null,
+  );
   const mapsKey = opts.config.mapsApiKey;
   app.decorate(
     "geocoder",
@@ -59,6 +72,7 @@ export async function buildApp(opts: {
   app.decorate("google", opts.google !== undefined ? opts.google : opts.config.google ? new HttpGoogleApi(opts.config.google) : null);
 
   await app.register(cookie);
+  await app.register(multipart, { limits: { fileSize: 15 * 1024 * 1024, files: 1, fields: 5 } });
   await app.register(rateLimit, { global: false });
 
   app.setErrorHandler((err, req, reply) => {
@@ -87,5 +101,11 @@ export async function buildApp(opts: {
   await app.register(goalRoutes);
   await app.register(peopleRoutes);
   await app.register(planRoutes);
+  await app.register(photoRoutes);
   return app;
+}
+
+export function photoStoreFor(config: AppConfig): PhotoStore {
+  const s = config.supabaseStorage;
+  return s ? new SupabasePhotoStore(s.url, s.serviceRoleKey, s.bucket) : new LocalDiskPhotoStore(config.photoDir);
 }

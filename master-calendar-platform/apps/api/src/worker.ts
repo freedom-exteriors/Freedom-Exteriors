@@ -8,12 +8,20 @@ import { Crypter } from "./lib/crypto.js";
 import { fetchFeed } from "./ingestion/safe-fetch.js";
 import { runDueSyncs } from "./ingestion/sync-runner.js";
 import { HttpGoogleApi } from "./integrations/google-api.js";
+import { runPendingExtractions } from "./extraction/process.js";
+import { ClaudeScheduleExtractor } from "./extraction/extractor.js";
+import { photoStoreFor } from "./app.js";
 
 loadEnv({ path: path.resolve(import.meta.dirname, "../../../.env") });
 const config = loadConfig();
 const prisma = createPrismaClient(config.databaseUrl);
 const crypter = config.credentialsKey ? new Crypter(config.credentialsKey) : null;
 const google = config.google ? new HttpGoogleApi(config.google) : null;
+const extraction = {
+  store: photoStoreFor(config),
+  extractor: config.extractionModel ? new ClaudeScheduleExtractor(config.extractionModel) : null,
+  log: (msg: string, extra: object = {}) => log(msg, extra),
+};
 const log = (msg: string, extra: object = {}) => console.log(JSON.stringify({ t: new Date().toISOString(), msg, ...extra }));
 
 let stopping = false;
@@ -21,6 +29,7 @@ async function tick() {
   try {
     const r = await runDueSyncs(prisma, { fetchFeed, crypter, google, log });
     if (r.attempted) log("tick", r);
+    await runPendingExtractions(prisma, extraction);
   } catch (err) {
     log("tick failed", { error: String(err) });
   }

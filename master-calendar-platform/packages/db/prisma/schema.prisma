@@ -61,21 +61,22 @@ model Workspace {
 }
 
 model User {
-  id                  String                @id @default(uuid()) @db.Uuid
-  email               String                @unique // stored lowercased by the app
+  id                  String                  @id @default(uuid()) @db.Uuid
+  email               String                  @unique // stored lowercased by the app
   passwordHash        String // argon2id
   memberships         WorkspaceMembership[]
   sessions            Session[]
   notifications       Notification[]
+  uploadedSchedules   UploadedScheduleImage[]
   invitesSent         WorkspaceInvite[]
   oauthConnections    OAuthConnection[]
   oauthStates         OAuthState[]
   // Attribution only ("added by Sam") — never used for authorization.
-  tasksCreated        Task[]                @relation("TaskCreatedBy")
-  tasksCompleted      Task[]                @relation("TaskCompletedBy")
-  shoppingItemsAdded  ShoppingItem[]        @relation("ShoppingItemAddedBy")
-  shoppingItemsBought ShoppingItem[]        @relation("ShoppingItemCheckedBy")
-  createdAt           DateTime              @default(now()) @db.Timestamptz(3)
+  tasksCreated        Task[]                  @relation("TaskCreatedBy")
+  tasksCompleted      Task[]                  @relation("TaskCompletedBy")
+  shoppingItemsAdded  ShoppingItem[]          @relation("ShoppingItemAddedBy")
+  shoppingItemsBought ShoppingItem[]          @relation("ShoppingItemCheckedBy")
+  createdAt           DateTime                @default(now()) @db.Timestamptz(3)
 }
 
 // Server-side session store. `id` is the SHA-256 of the session token handed to the
@@ -528,19 +529,23 @@ enum ExtractionStatus {
 }
 
 model UploadedScheduleImage {
-  id              String           @id @default(uuid()) @db.Uuid
-  workspaceId     String           @db.Uuid
-  workspace       Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  id               String           @id @default(uuid()) @db.Uuid
+  workspaceId      String           @db.Uuid
+  workspace        Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   // Object path inside the private Supabase Storage bucket (served via short-lived signed
   // URLs) — not a public URL, since these photos are often kids' schedules / client data.
-  storagePath     String
-  status          ExtractionStatus @default(pending)
-  errorMessage    String?
+  storagePath      String
+  status           ExtractionStatus @default(pending)
+  errorMessage     String?
   // Candidate events awaiting human confirmation — NOT Event rows yet.
-  extractedEvents Json?
-  createdAt       DateTime         @default(now()) @db.Timestamptz(3)
+  extractedEvents  Json?
+  uploadedByUserId String?          @db.Uuid
+  uploadedBy       User?            @relation(fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+  createdAt        DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime         @default(now()) @updatedAt @db.Timestamptz(3)
 
   @@index([workspaceId])
+  @@index([status, updatedAt])
 }
 
 // ───────────────────────── Places, availability, travel ─────────────────────────

@@ -10,6 +10,13 @@ const schema = z.object({
   PUBLIC_WEB_URL: z.string().optional(),
   CREDENTIALS_ENCRYPTION_KEY: z.string().optional(),
   GOOGLE_MAPS_API_KEY: z.string().optional(),
+  ANTHROPIC_API_KEY: z.string().optional(),
+  ANTHROPIC_AUTH_TOKEN: z.string().optional(),
+  EXTRACTION_MODEL: z.string().default("claude-opus-5"),
+  SUPABASE_URL: z.string().optional(),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
+  SUPABASE_STORAGE_BUCKET: z.string().default("schedule-photos"),
+  PHOTO_DIR: z.string().optional(),
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
   GOOGLE_REDIRECT_URI: z.string().optional(),
@@ -29,6 +36,11 @@ export interface AppConfig {
   credentialsKey: string | null;
   /** Google Maps Platform key (Geocoding + Routes); null disables address lookup and live traffic. */
   mapsApiKey: string | null;
+  /** Vision model for photo extraction; null when no Anthropic credentials are configured. */
+  extractionModel: string | null;
+  /** Private Supabase Storage bucket for photos; null → local folder (`photoDir`). */
+  supabaseStorage: { url: string; serviceRoleKey: string; bucket: string } | null;
+  photoDir: string;
   /** Google OAuth client; null disables "Connect Google Calendar". */
   google: { clientId: string; clientSecret: string; redirectUri: string } | null;
 }
@@ -46,6 +58,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     authRateLimitMax: c.AUTH_RATE_LIMIT_PER_MINUTE,
     credentialsKey: c.CREDENTIALS_ENCRYPTION_KEY || null,
     mapsApiKey: c.GOOGLE_MAPS_API_KEY || null,
+    extractionModel: c.ANTHROPIC_API_KEY || c.ANTHROPIC_AUTH_TOKEN ? c.EXTRACTION_MODEL : null,
+    supabaseStorage:
+      c.SUPABASE_URL && c.SUPABASE_SERVICE_ROLE_KEY
+        ? { url: c.SUPABASE_URL, serviceRoleKey: c.SUPABASE_SERVICE_ROLE_KEY, bucket: c.SUPABASE_STORAGE_BUCKET }
+        : null,
+    photoDir: c.PHOTO_DIR || new URL("../.data/photos", import.meta.url).pathname,
     google:
       c.GOOGLE_CLIENT_ID && c.GOOGLE_CLIENT_SECRET && c.GOOGLE_REDIRECT_URI
         ? { clientId: c.GOOGLE_CLIENT_ID, clientSecret: c.GOOGLE_CLIENT_SECRET, redirectUri: c.GOOGLE_REDIRECT_URI }
