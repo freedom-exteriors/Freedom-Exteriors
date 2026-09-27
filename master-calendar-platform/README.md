@@ -6,7 +6,8 @@ on: shared grocery lists, honey-do lists, short- and long-term goals, and season
 reminders. Families can also link up in shared **circles** to plan carpools, team snacks
 and trips. The same engine serves three verticals: **family**,
 **student**, and **small business**. The verticals differ only in seed data and UI labels
-(`packages/db/seed-templates/`). The engine never branches on vertical.
+(`apps/api/                   Fastify API (auth, workspaces, members, invites so far)
+packages/db/seed-templates/`). The engine never branches on vertical.
 
 Stack: npm workspaces · Fastify + TypeScript API · Prisma 7 on Supabase-hosted Postgres ·
 React web app · Supabase Storage for photos · Vercel (web) + Railway (API + cron).
@@ -16,8 +17,8 @@ React web app · Supabase Storage for photos · Vercel (web) + Railway (API + cr
 | Step | Scope | Status |
 |---|---|---|
 | 1 | DB schema + migrations, templates, dev seed (calendar, lists, goals, reminders, circles) | ✅ done |
-| 2 | Auth (email + password, DB sessions, membership-scoped middleware) + invites (second parent, join a circle) | next |
-| 3 | ICS feed parser + subscription job | |
+| 2 | Auth (email + password, DB sessions, membership-scoped middleware) + invites (second parent, join a circle) | ✅ done |
+| 3 | ICS feed parser + subscription job | next |
 | 4 | Google Calendar OAuth + sync | |
 | 5 | Unified event query endpoint (incl. circle events assigned to your household) | |
 | 6 | Lists & goals API: shopping lists, task lists, goals with milestones | *new* |
@@ -36,7 +37,8 @@ docker compose -f infra/docker-compose.yml up -d   # or any local Postgres 16
 npm install                                         # also runs `prisma generate`
 npm run db:deploy                                   # apply migrations
 npm run db:seed                                     # one workspace per vertical
-npm test                                            # template + DB constraint tests
+npm test                                            # db, planner and API tests
+npm run dev -w @mcp/api                             # API on :3001
 ```
 
 `npm run db:migrate` creates a new migration after you edit `schema.prisma`.
@@ -76,6 +78,46 @@ packages/shared-types/      types shared by the API and the web app (no Prisma i
 apps/                       api and web start in steps 2 and 8
 infra/docker-compose.yml    local Postgres
 ```
+
+## API: auth and access control (step 2)
+
+| Endpoint | Who | What |
+|---|---|---|
+| `POST /auth/signup` | anyone | email + password (8+ chars); can create the first workspace and your participant in one go |
+| `POST /auth/login` / `POST /auth/logout` | anyone / signed in | logout kills the session server-side |
+| `GET /auth/me` | signed in | you + your workspaces and roles |
+| `GET /workspaces`, `POST /workspaces` | signed in | create a home, or a circle "as" one of your homes |
+| `GET /workspaces/:id` | viewer+ | details, participants, and template labels/pickers for the UI |
+| `GET /workspaces/:id/members` | member+ | |
+| `PATCH` / `DELETE /workspaces/:id/members/:mid` | owner (or yourself, to leave) | the last owner can't be removed or demoted |
+| `POST` / `GET` / `DELETE /workspaces/:id/invites` | owner | link valid 7 days; optionally tied to an email, and/or to a participant ("Maya's login") |
+| `GET /invites/:token` | anyone | preview: "Join Rivera Family as a viewer" |
+| `POST /invites/:token/accept` | signed in | circle invites ask which of your households is joining |
+
+**Security choices:**
+
+- **Sessions.** These follow the Lucia guide, implemented in-repo (the package is
+  deprecated). The cookie holds a random 256-bit token; the DB stores its SHA-256. Cookies
+  are httpOnly, SameSite=Lax, and Secure in production. Sessions last 30 days and extend
+  while in use. Logout deletes the row.
+- **Passwords.** argon2id. Login responds the same way, and takes the same time, whether
+  or not the email exists.
+- **Authorization.** Every `/workspaces/:workspaceId/...` route goes through
+  `requireWorkspace(minRole)`, which loads *your* membership. A non-member gets **404**,
+  identical to a workspace that doesn't exist. A member without enough rights gets 403.
+  Future routes (events, lists, planner) use the same guard.
+- **CSRF.** POST/PATCH/DELETE must carry an `Origin` in `WEB_ORIGIN`.
+- **Rate limits.** Signup/login are rate-limited per IP (10/min), invite lookups 30/min.
+- **Invite tokens.** Stored hashed and single-use; concurrent accepts are handled safely.
+  Unknown, used and expired tokens all get the same 404.
+- 12 API tests cover all of the above, including non-member probing, the last owner,
+  invites that are expired, revoked or sent to another email, and circles.
+
+**Production note:** the browser must see the API as same-site, or the SameSite=Lax
+cookie won't be sent. Plan: Vercel rewrites `/api/*` to the Railway API, so the browser
+only ever talks to one origin, and the Vite dev server proxies the same way locally.
+**Not built yet (fast-follows):** password reset and email verification (both need an
+email sender), magic links, and "sign out everywhere".
 
 ## Home hub: lists, goals, reminders
 
@@ -200,7 +242,7 @@ target setup, per the original brief:
 | Postgres | **Supabase** (DB only, Prisma migrations) | Needs a *new* Supabase project. Don't reuse the Freedom Exteriors CRM project. |
 | Schedule photos | **Supabase Storage**, private bucket | Same new project. |
 | Web app | **Vercel** | A new Vercel project with root directory `master-calendar-platform/apps/web`, separate from the CRM's. |
-| API + scheduled jobs | **Railway** | The leave-by job runs every few minutes and re-checks traffic. That needs a long-running worker, not Vercel's cron (daily-only on the Hobby plan). |
+| API + scheduled jobs | **Railway** (behind a Vercel `/api` rewrite, so cookies are first-party) | The leave-by job runs every few minutes and re-checks traffic. That needs a long-running worker, not Vercel's cron (daily-only on the Hobby plan). |
 
 ## Retailer integrations: what's actually possible
 

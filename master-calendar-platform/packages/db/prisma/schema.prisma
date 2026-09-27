@@ -117,6 +117,9 @@ model WorkspaceInvite {
   tokenHash       String         @unique
   email           String? // optional: restrict to this address
   role            MembershipRole
+  // Home invites only: the Participant the invitee will "be" (e.g. Maya's own login).
+  participantId   String?        @db.Uuid
+  participant     Participant?   @relation(fields: [participantId], references: [id], onDelete: Cascade)
   invitedByUserId String         @db.Uuid
   invitedBy       User           @relation(fields: [invitedByUserId], references: [id], onDelete: Cascade)
   expiresAt       DateTime       @db.Timestamptz(3)
@@ -150,6 +153,7 @@ model Participant {
   canDrive                    Boolean              @default(false)
   maxPlannedTaskMinutesPerDay Int                  @default(90) // the organizer never plans more than this
   availability                AvailabilityWindow[]
+  invites                     WorkspaceInvite[]
   drivingEvents               Event[]              @relation("EventDriver")
   departureAlerts             DepartureAlert[]
   createdAt                   DateTime             @default(now()) @db.Timestamptz(3)
