@@ -52,6 +52,8 @@ model Workspace {
   recurringReminders  RecurringReminder[]
   invites             WorkspaceInvite[]
   places              Place[]
+  oauthConnections    OAuthConnection[]
+  oauthStates         OAuthState[]
   notifications       Notification[]
   // In circles: the Participant rows that represent this home.
   representedIn       Participant[]           @relation("LinkedWorkspace")
@@ -66,6 +68,8 @@ model User {
   sessions            Session[]
   notifications       Notification[]
   invitesSent         WorkspaceInvite[]
+  oauthConnections    OAuthConnection[]
+  oauthStates         OAuthState[]
   // Attribution only ("added by Sam") — never used for authorization.
   tasksCreated        Task[]                @relation("TaskCreatedBy")
   tasksCompleted      Task[]                @relation("TaskCompletedBy")
@@ -197,9 +201,11 @@ model CalendarSource {
   type                 CalendarSourceType
   feedUrl              String?
   // AES-256-GCM ciphertext (app-layer, key from env) — never plaintext.
-  oauthAccessTokenEnc  Bytes?
-  oauthRefreshTokenEnc Bytes?
-  tokenExpiresAt       DateTime?           @db.Timestamptz(3)
+  // Google (and future OAuth) sources: which account + which of its calendars. Tokens live
+  // on the connection, shared by every calendar picked from that account.
+  oauthConnectionId    String?             @db.Uuid
+  oauthConnection      OAuthConnection?    @relation(fields: [oauthConnectionId], references: [id], onDelete: Cascade)
+  externalCalendarId   String?
   feedUsernameEnc      Bytes?
   feedPasswordEnc      Bytes?
   lastSyncedAt         DateTime?           @db.Timestamptz(3)
@@ -217,6 +223,7 @@ model CalendarSource {
   createdAt            DateTime            @default(now()) @db.Timestamptz(3)
   events               Event[]
 
+  @@unique([oauthConnectionId, externalCalendarId])
   @@index([workspaceId])
   @@index([type, nextSyncAt])
 }
@@ -637,4 +644,56 @@ model Notification {
 
   @@unique([userId, dedupeKey, channel])
   @@index([sentAt, sendAt])
+}
+
+// ───────────────────────── OAuth (Google Calendar) ─────────────────────────
+
+enum OAuthProvider {
+  google
+}
+
+enum OAuthConnectionStatus {
+  active
+  needs_reauth // refresh token revoked/expired: syncs pause until the person reconnects
+}
+
+// One per (workspace, external account). Belongs to the person who connected it: only
+// they can browse that account's calendar list and pick calendars from it, because it's
+// *their* Google account (others in the workspace just see the chosen calendars' events).
+model OAuthConnection {
+  id                String                @id @default(uuid()) @db.Uuid
+  workspaceId       String                @db.Uuid
+  workspace         Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  connectedByUserId String                @db.Uuid
+  connectedBy       User                  @relation(fields: [connectedByUserId], references: [id], onDelete: Cascade)
+  provider          OAuthProvider
+  providerAccountId String // Google "sub"
+  accountEmail      String
+  // AES-256-GCM ciphertext (app-layer, key from env) — never plaintext.
+  accessTokenEnc    Bytes
+  refreshTokenEnc   Bytes
+  tokenExpiresAt    DateTime              @db.Timestamptz(3)
+  scopes            String
+  status            OAuthConnectionStatus @default(active)
+  sources           CalendarSource[]
+  createdAt         DateTime              @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime              @updatedAt @db.Timestamptz(3)
+
+  @@unique([workspaceId, provider, providerAccountId])
+}
+
+// In-flight OAuth handshakes: single-use, 10-minute life. `state` ties the callback to
+// the person and workspace that started it (stops login-CSRF / mix-up attacks); the PKCE
+// verifier proves the code exchange comes from us.
+model OAuthState {
+  id           String        @id @default(uuid()) @db.Uuid
+  stateHash    String        @unique
+  codeVerifier String
+  provider     OAuthProvider
+  userId       String        @db.Uuid
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspaceId  String        @db.Uuid
+  workspace    Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  expiresAt    DateTime      @db.Timestamptz(3)
+  createdAt    DateTime      @default(now()) @db.Timestamptz(3)
 }

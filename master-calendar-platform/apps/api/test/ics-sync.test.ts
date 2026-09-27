@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { createWorkspaceFromTemplate } from "@mcp/db";
-import { runDueIcsSyncs, syncIcsSource } from "../src/ingestion/ics-sync.js";
+import { syncIcsSource } from "../src/ingestion/ics-sync.js";
+import { runDueSyncs } from "../src/ingestion/sync-runner.js";
 import { FeedError } from "../src/ingestion/safe-fetch.js";
 import { FakeFeed, prisma } from "./helpers.js";
 
@@ -91,7 +92,7 @@ test("an empty feed doesn't wipe the calendar", async () => {
 test("scheduler: runs due feeds once, backs off on failure, never double-claims", async () => {
   const s = await setup();
   try {
-    const run = () => runDueIcsSyncs(prisma, { ...s.deps, limit: 1000 });
+    const run = () => runDueSyncs(prisma, { ...s.deps, google: null, limit: 1000 });
     await Promise.all([run(), run()]);
     assert.equal(s.feed.requests.length, 1, "claimed by exactly one runner");
     await run();

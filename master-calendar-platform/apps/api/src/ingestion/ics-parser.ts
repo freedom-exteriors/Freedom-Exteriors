@@ -6,22 +6,13 @@
 // both IANA TZIDs and feed-defined VTIMEZONEs.
 import ICAL from "ical.js";
 import { zonedToUtc } from "@mcp/planner";
+import type { Occurrence } from "./apply.js";
 
 type Time = InstanceType<typeof ICAL.Time>;
 type Component = InstanceType<typeof ICAL.Component>;
 type Event = InstanceType<typeof ICAL.Event>;
 
-export interface ParsedOccurrence {
-  externalUid: string;
-  /** "" for one-off events; the occurrence's original start (ISO UTC, or YYYY-MM-DD) for series. */
-  externalRecurrenceId: string;
-  title: string;
-  startTime: Date;
-  endTime: Date;
-  allDay: boolean;
-  location: string | null;
-  raw: Record<string, unknown>;
-}
+export type ParsedOccurrence = Occurrence;
 
 export interface ParseOptions {
   /** Zone for floating times and all-day dates (the workspace's). */

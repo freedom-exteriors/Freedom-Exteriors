@@ -6,18 +6,20 @@ import { createPrismaClient } from "@mcp/db";
 import { loadConfig } from "./config.js";
 import { Crypter } from "./lib/crypto.js";
 import { fetchFeed } from "./ingestion/safe-fetch.js";
-import { runDueIcsSyncs } from "./ingestion/ics-sync.js";
+import { runDueSyncs } from "./ingestion/sync-runner.js";
+import { HttpGoogleApi } from "./integrations/google-api.js";
 
 loadEnv({ path: path.resolve(import.meta.dirname, "../../../.env") });
 const config = loadConfig();
 const prisma = createPrismaClient(config.databaseUrl);
 const crypter = config.credentialsKey ? new Crypter(config.credentialsKey) : null;
+const google = config.google ? new HttpGoogleApi(config.google) : null;
 const log = (msg: string, extra: object = {}) => console.log(JSON.stringify({ t: new Date().toISOString(), msg, ...extra }));
 
 let stopping = false;
 async function tick() {
   try {
-    const r = await runDueIcsSyncs(prisma, { fetchFeed, crypter, log });
+    const r = await runDueSyncs(prisma, { fetchFeed, crypter, google, log });
     if (r.attempted) log("tick", r);
   } catch (err) {
     log("tick failed", { error: String(err) });

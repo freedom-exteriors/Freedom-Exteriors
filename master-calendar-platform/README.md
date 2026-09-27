@@ -20,8 +20,8 @@ React web app · Supabase Storage for photos · Vercel (web) + Railway (API + cr
 | 1 | DB schema + migrations, templates, dev seed (calendar, lists, goals, reminders, circles) | ✅ done |
 | 2 | Auth (email + password, DB sessions, membership-scoped middleware) + invites (second parent, join a circle) | ✅ done |
 | 3 | ICS feed parser + subscription job | ✅ done |
-| 4 | Google Calendar OAuth + sync | next |
-| 5 | Unified event query endpoint (incl. circle events assigned to your household) | |
+| 4 | Google Calendar OAuth + sync | ✅ done |
+| 5 | Unified event query endpoint (incl. circle events assigned to your household) | next |
 | 6 | Lists & goals API: shopping lists, task lists, goals with milestones | *new* |
 | 7 | Photo extraction → review → confirm | |
 | 8 | Scheduled jobs: automation rule engine, seasonal reminders, **leave-by traffic alerts**, notification sender | *expanded* |
@@ -179,6 +179,61 @@ code path serves all of them; nothing is special-cased or scraped.
 
 **Worker:** `npm run worker -w @mcp/api` (a second Railway service). It runs due syncs
 every minute; later steps add automation, reminders and leave-by alerts to the same loop.
+
+## Google Calendar — step 4
+
+Flow: **Connect Google** → Google's consent screen (read-only calendar access) → back in
+the app, pick which calendars to bring in, e.g. "Rivera Family" but not "Work". Each
+picked calendar becomes a `CalendarSource` and syncs with exactly the same rules as ICS
+feeds (`ingestion/apply.ts`: the source owns title/time/location, people own
+assignments, moved instances update in place, and an empty result never wipes a
+calendar).
+
+| Endpoint | Who |
+|---|---|
+| `POST /workspaces/:id/integrations/google/start` → `{ url }` | member+ |
+| `GET /integrations/google/callback` | Google redirects here; always redirects back to `/w/:id/settings/calendars?google=connected\|error&reason=…` |
+| `GET /workspaces/:id/integrations/google` | member+; connected accounts, with `mine` |
+| `GET` / `POST …/google/:connectionId/calendars` | **only the person who connected that Google account**: it's their account, so others in the family see the chosen calendars' events, not the account's calendar list |
+| `DELETE …/google/:connectionId` | that person or an owner; revokes at Google, removes those calendars + events |
+
+**How it's built:**
+- **OAuth:** authorization code + **PKCE** + single-use `state` (hashed, 10-minute life,
+  bound to the user and workspace that started it; the callback must come from the same
+  logged-in user). `access_type=offline` + `prompt=consent` so there's always a refresh
+  token. If someone unticks the calendar checkbox on Google's consent screen, the partial
+  grant is revoked and they're told why.
+- **Tokens:** AES-256-GCM encrypted, **one `OAuthConnection` per Google account**, shared
+  by every calendar picked from it (a deviation from the brief's per-source token
+  columns, which would duplicate one account's tokens across calendars). Tokens refresh
+  automatically 2 minutes before expiry.
+- **Revoked access:** if someone removes access in their Google account, the connection
+  flips to `needs_reauth`. Syncs pause (existing events stay; Google isn't retried), and
+  each calendar shows "reconnect Google". Reconnecting clears it and syncs right away.
+- **Events:** `singleEvents=true`, so Google expands repeats. Key = (`recurringEventId`,
+  `originalStartTime`), so a moved instance is an update. Cancelled instances and
+  "working location" markers are skipped. All-day dates use the workspace time zone.
+- Only calendars the account can actually see can be added.
+
+**Setting up Google (one time, ~10 minutes):**
+
+1. [console.cloud.google.com](https://console.cloud.google.com) → create a project
+   (e.g. "Home Base").
+2. *APIs & Services → Library* → enable **Google Calendar API**.
+3. *Google Auth Platform* (OAuth consent screen): user type **External**, app name,
+   support email. Under *Audience*, keep it in **Testing** and add your family's Gmail
+   addresses as test users. Under *Data access*, add the scope
+   `.../auth/calendar.readonly`.
+4. *Clients → Create client → Web application*. Authorized redirect URIs:
+   `http://localhost:5173/api/integrations/google/callback` (dev) and
+   `https://<your-domain>/api/integrations/google/callback` (prod).
+5. Put the client ID and secret in `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`.
+
+*Testing-mode caveat:* up to 100 test users, and Google expires refresh tokens for
+testing-mode apps after about 7 days, so people would have to reconnect weekly. The app
+handles this gracefully (the reconnect prompt above). For real users, submit the app for
+Google's verification: `calendar.readonly` is a *sensitive* scope, which means a review
+of the app, not the paid security assessment that *restricted* scopes need.
 
 ## Home hub: lists, goals, reminders
 

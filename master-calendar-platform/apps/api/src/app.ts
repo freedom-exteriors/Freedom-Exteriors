@@ -9,6 +9,8 @@ import { authRoutes } from "./auth/routes.js";
 import { workspaceRoutes } from "./routes/workspaces.js";
 import { inviteRoutes } from "./routes/invites.js";
 import { calendarSourceRoutes } from "./routes/calendar-sources.js";
+import { googleRoutes } from "./routes/google.js";
+import { HttpGoogleApi, type GoogleApi } from "./integrations/google-api.js";
 import { Crypter } from "./lib/crypto.js";
 import { fetchFeed, type FeedFetcher } from "./ingestion/safe-fetch.js";
 
@@ -18,6 +20,7 @@ declare module "fastify" {
     config: AppConfig;
     feedFetcher: FeedFetcher;
     crypter: Crypter | null;
+    google: GoogleApi | null;
   }
 }
 
@@ -27,6 +30,8 @@ export async function buildApp(opts: {
   logger?: boolean;
   /** Injected in tests; defaults to the SSRF-safe fetcher. */
   feedFetcher?: FeedFetcher;
+  /** Injected in tests; defaults to the real client when GOOGLE_* env vars are set. */
+  google?: GoogleApi | null;
 }): Promise<FastifyInstance> {
   const app = Fastify({
     logger: opts.logger ?? false,
@@ -37,6 +42,7 @@ export async function buildApp(opts: {
   app.decorate("config", opts.config);
   app.decorate("feedFetcher", opts.feedFetcher ?? fetchFeed);
   app.decorate("crypter", opts.config.credentialsKey ? new Crypter(opts.config.credentialsKey) : null);
+  app.decorate("google", opts.google !== undefined ? opts.google : opts.config.google ? new HttpGoogleApi(opts.config.google) : null);
 
   await app.register(cookie);
   await app.register(rateLimit, { global: false });
@@ -60,5 +66,6 @@ export async function buildApp(opts: {
   await app.register(workspaceRoutes);
   await app.register(inviteRoutes);
   await app.register(calendarSourceRoutes);
+  await app.register(googleRoutes);
   return app;
 }

@@ -5,7 +5,8 @@ import { parse } from "../lib/validate.js";
 import { assertParticipantIn, assertTagIn } from "../lib/scope.js";
 import { requireWorkspace } from "../auth/plugin.js";
 import { normalizeFeedUrl } from "../ingestion/safe-fetch.js";
-import { describeSyncError, syncIcsSource } from "../ingestion/ics-sync.js";
+import { syncIcsSource } from "../ingestion/ics-sync.js";
+import { describeSyncError, syncSource } from "../ingestion/sync-runner.js";
 
 const MANUAL_SYNC_COOLDOWN_MS = 5 * 60_000;
 
@@ -39,12 +40,12 @@ function maskUrl(url: string | null): string | null {
 }
 
 export async function calendarSourceRoutes(app: FastifyInstance) {
-  const syncDeps = () => ({ fetchFeed: app.feedFetcher, crypter: app.crypter });
+  const syncDeps = () => ({ fetchFeed: app.feedFetcher, crypter: app.crypter, google: app.google });
 
   app.get("/workspaces/:workspaceId/calendar-sources", { preHandler: requireWorkspace() }, async (req) => {
     const rows = await app.prisma.calendarSource.findMany({
       where: { workspaceId: req.membership!.workspaceId },
-      include: { _count: { select: { events: true } } },
+      include: { _count: { select: { events: true } }, oauthConnection: { select: { accountEmail: true, status: true } } },
       orderBy: { createdAt: "asc" },
     });
     return rows.map((s) => ({
@@ -53,6 +54,7 @@ export async function calendarSourceRoutes(app: FastifyInstance) {
       type: s.type,
       feed: maskUrl(s.feedUrl),
       hasCredentials: !!s.feedPasswordEnc,
+      googleAccount: s.oauthConnection ? { email: s.oauthConnection.accountEmail, status: s.oauthConnection.status } : null,
       defaultParticipantId: s.defaultParticipantId,
       defaultEventTagId: s.defaultEventTagId,
       lastSyncedAt: s.lastSyncedAt,
@@ -139,12 +141,12 @@ export async function calendarSourceRoutes(app: FastifyInstance) {
   app.post("/workspaces/:workspaceId/calendar-sources/:sourceId/sync", { preHandler: requireWorkspace("member") }, async (req) => {
     const { sourceId } = parse(sourceParams, req.params);
     const source = await findSource(app, req.membership!.workspaceId, sourceId);
-    if (source.type !== "ics_feed") throw badRequest("unsupported", "Only calendar feeds can be synced here");
+    if (source.type !== "ics_feed" && source.type !== "google") throw badRequest("unsupported", "This calendar can't be synced");
     if (source.lastSyncedAt && Date.now() - source.lastSyncedAt.getTime() < MANUAL_SYNC_COOLDOWN_MS) {
       throw new HttpError(429, "too_soon", "This calendar was just updated — try again in a few minutes");
     }
     try {
-      return { stats: await syncIcsSource(app.prisma, sourceId, syncDeps()) };
+      return { stats: await syncSource(app.prisma, sourceId, syncDeps()) };
     } catch (err) {
       const message = describeSyncError(err);
       await app.prisma.calendarSource.update({ where: { id: sourceId }, data: { lastSyncError: message } });

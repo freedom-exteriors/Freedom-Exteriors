@@ -28,7 +28,7 @@ test("invite a teen as a viewer who claims their participant; roles are enforced
   const inv = await parent.post(`/workspaces/${workspaceId}/invites`, { role: "viewer", email: email("maya2"), participantId: maya.id });
   assert.equal(inv.statusCode, 201);
   const { token, url } = inv.json();
-  assert.ok(url.endsWith(`/invite/${token}`));
+  assert.equal(url, `http://localhost:5173/invite/${token}`, "absolute link someone can open from a text message");
   assert.equal(await prisma.workspaceInvite.count({ where: { tokenHash: token } }), 0, "only the hash is stored");
 
   const preview = (await new Client(app).get(`/invites/${token}`)).json();

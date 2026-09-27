@@ -6,6 +6,7 @@ import { createPrismaClient } from "@mcp/db";
 import { buildApp } from "../src/app.js";
 import { loadConfig, type AppConfig } from "../src/config.js";
 import type { FeedFetcher, FeedRequest } from "../src/ingestion/safe-fetch.js";
+import type { GoogleApi } from "../src/integrations/google-api.js";
 
 loadEnv({ path: path.resolve(import.meta.dirname, "../../../.env") });
 
@@ -17,7 +18,10 @@ export const email = (name: string) => `${name}-${run}@api-test.test`;
 const apps: FastifyInstance[] = [];
 export const TEST_KEY = Buffer.alloc(32, 7).toString("base64");
 
-export async function makeApp(overrides: Partial<AppConfig> = {}, deps: { feedFetcher?: FeedFetcher } = {}): Promise<FastifyInstance> {
+export async function makeApp(
+  overrides: Partial<AppConfig> = {},
+  deps: { feedFetcher?: FeedFetcher; google?: GoogleApi | null } = {},
+): Promise<FastifyInstance> {
   const config = {
     ...loadConfig({ ...process.env, NODE_ENV: "test", WEB_ORIGIN: ORIGIN }),
     authRateLimitMax: 1000,
