@@ -1,0 +1,85 @@
+{
+  "id": "circle",
+  "labels": {
+    "workspace": "Circle",
+    "participant": "Household",
+    "participantPlural": "Households",
+    "contact": "Contact"
+  },
+  "eventTags": [
+    {
+      "key": "carpool",
+      "label": "Carpool",
+      "color": "#0EA5E9"
+    },
+    {
+      "key": "get_together",
+      "label": "Get-together",
+      "color": "#EC4899"
+    },
+    {
+      "key": "shared_trip",
+      "label": "Trip",
+      "color": "#8B5CF6"
+    },
+    {
+      "key": "sign_up",
+      "label": "Sign-up slot",
+      "color": "#F59E0B"
+    }
+  ],
+  "contactRoles": [
+    "coach",
+    "organizer",
+    "host",
+    "other"
+  ],
+  "automationRules": [
+    {
+      "tagKey": "carpool",
+      "timingOffsetMinutes": 1440,
+      "actionType": "flag_unassigned_task",
+      "actionPayload": {
+        "titleTemplate": "Who's driving? {{title}}"
+      }
+    },
+    {
+      "tagKey": "sign_up",
+      "timingOffsetMinutes": 2880,
+      "actionType": "flag_unassigned_task",
+      "actionPayload": {
+        "titleTemplate": "Unclaimed: {{title}}"
+      }
+    },
+    {
+      "tagKey": "get_together",
+      "timingOffsetMinutes": 2880,
+      "actionType": "create_reminder",
+      "actionPayload": {
+        "titleTemplate": "Confirm headcount for {{title}}"
+      }
+    }
+  ],
+  "taskLists": [
+    {
+      "key": "bring_list",
+      "name": "Who's bringing what",
+      "viewerCanAdd": true
+    }
+  ],
+  "shoppingLists": [
+    {
+      "key": "shared_supplies",
+      "name": "Shared supplies",
+      "preferredRetailer": null
+    }
+  ],
+  "shoppingCategories": [
+    "Food",
+    "Drinks",
+    "Paper goods",
+    "Gear",
+    "Other"
+  ],
+  "recurringReminders": []
+}

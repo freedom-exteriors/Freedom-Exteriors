@@ -1,5 +1,5 @@
 {
-  "vertical": "business",
+  "id": "business",
   "labels": {
     "workspace": "Business",
     "participant": "Team member",
@@ -7,31 +7,142 @@
     "contact": "Contact"
   },
   "eventTags": [
-    { "key": "client_meeting", "label": "Client meeting", "color": "#3B82F6" },
-    { "key": "invoice_due", "label": "Invoice due", "color": "#F59E0B" },
-    { "key": "staff_shift", "label": "Staff shift", "color": "#22C55E" },
-    { "key": "internal_meeting", "label": "Internal meeting", "color": "#64748B" },
-    { "key": "deadline", "label": "Deadline", "color": "#EF4444" }
+    {
+      "key": "client_meeting",
+      "label": "Client meeting",
+      "color": "#3B82F6"
+    },
+    {
+      "key": "invoice_due",
+      "label": "Invoice due",
+      "color": "#F59E0B"
+    },
+    {
+      "key": "staff_shift",
+      "label": "Staff shift",
+      "color": "#22C55E"
+    },
+    {
+      "key": "internal_meeting",
+      "label": "Internal meeting",
+      "color": "#64748B"
+    },
+    {
+      "key": "deadline",
+      "label": "Deadline",
+      "color": "#EF4444"
+    }
   ],
-  "contactRoles": ["client", "vendor", "contractor", "accountant", "supplier", "other"],
+  "contactRoles": [
+    "client",
+    "vendor",
+    "contractor",
+    "accountant",
+    "supplier",
+    "other"
+  ],
   "automationRules": [
     {
       "tagKey": "invoice_due",
       "timingOffsetMinutes": 4320,
       "actionType": "create_reminder",
-      "actionPayload": { "titleTemplate": "Send reminder: {{title}}" }
+      "actionPayload": {
+        "titleTemplate": "Send reminder: {{title}}"
+      }
     },
     {
       "tagKey": "client_meeting",
       "timingOffsetMinutes": 1440,
       "actionType": "create_reminder",
-      "actionPayload": { "titleTemplate": "Prep agenda for {{title}}" }
+      "actionPayload": {
+        "titleTemplate": "Prep agenda for {{title}}"
+      }
     },
     {
       "tagKey": "staff_shift",
       "timingOffsetMinutes": 2880,
       "actionType": "flag_unassigned_task",
-      "actionPayload": { "titleTemplate": "Unstaffed shift: {{title}}" }
+      "actionPayload": {
+        "titleTemplate": "Unstaffed shift: {{title}}"
+      }
+    }
+  ],
+  "taskLists": [
+    {
+      "key": "maintenance",
+      "name": "Maintenance",
+      "viewerCanAdd": false
+    },
+    {
+      "key": "admin",
+      "name": "Admin & paperwork",
+      "viewerCanAdd": false
+    }
+  ],
+  "shoppingLists": [
+    {
+      "key": "supplies",
+      "name": "Supply order",
+      "preferredRetailer": null
+    }
+  ],
+  "shoppingCategories": [
+    "Ingredients",
+    "Packaging",
+    "Cleaning",
+    "Office",
+    "Equipment",
+    "Other"
+  ],
+  "recurringReminders": [
+    {
+      "title": "Quarterly estimated tax payment (US)",
+      "category": "finance",
+      "rrule": "FREQ=YEARLY;BYMONTH=1,4,6,9;BYMONTHDAY=15",
+      "leadDays": 14,
+      "taskListKey": "admin"
+    },
+    {
+      "title": "Send 1099-NEC forms to contractors",
+      "category": "finance",
+      "rrule": "FREQ=YEARLY;BYMONTH=1;BYMONTHDAY=31",
+      "leadDays": 21,
+      "taskListKey": "admin"
+    },
+    {
+      "title": "Monthly bookkeeping close",
+      "category": "finance",
+      "rrule": "FREQ=MONTHLY;BYMONTHDAY=5",
+      "leadDays": 2,
+      "taskListKey": "admin"
+    },
+    {
+      "title": "Annual fire extinguisher inspection",
+      "category": "compliance",
+      "rrule": "FREQ=YEARLY;BYMONTH=3;BYMONTHDAY=1",
+      "leadDays": 14,
+      "taskListKey": "maintenance"
+    },
+    {
+      "title": "Renew business license (set your real date)",
+      "category": "compliance",
+      "rrule": "FREQ=YEARLY;BYMONTH=12;BYMONTHDAY=1",
+      "leadDays": 30,
+      "taskListKey": "admin"
+    },
+    {
+      "title": "Review insurance policies",
+      "category": "finance",
+      "rrule": "FREQ=YEARLY;BYMONTH=11;BYMONTHDAY=1",
+      "leadDays": 14,
+      "taskListKey": "admin"
+    },
+    {
+      "title": "Deep-clean equipment & check HVAC filters",
+      "category": "maintenance",
+      "rrule": "FREQ=YEARLY;BYMONTH=1,4,7,10;BYMONTHDAY=1",
+      "leadDays": 3,
+      "taskListKey": "maintenance"
     }
   ]
 }

@@ -2,8 +2,10 @@
 // never pulls in the DB client.
 
 export type WorkspaceVertical = "family" | "student" | "business";
+export type WorkspaceKind = "home" | "circle";
 export type MembershipRole = "owner" | "member" | "viewer";
 export type ActionType = "create_reminder" | "flag_unassigned_task";
+export type Retailer = "amazon" | "target" | "walmart" | "kroger" | "instacart";
 
 /** One photo-extraction candidate, stored in UploadedScheduleImage.extractedEvents until confirmed. */
 export interface ExtractedEventCandidate {

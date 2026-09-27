@@ -1,12 +1,16 @@
-// Static per-vertical seed data. This is the ONLY place verticals differ — the engine
-// never branches on vertical. Adding a vertical = add a JSON file + an enum value.
-import type { ActionType, WorkspaceVertical } from "@mcp/shared-types";
+// Static seed data per workspace flavor. This is the ONLY place verticals differ — the
+// engine never branches on vertical or kind. Adding a vertical = add a JSON file + an
+// enum value.
+import type { ActionType, Retailer, WorkspaceKind, WorkspaceVertical } from "@mcp/shared-types";
 import family from "./family.json" with { type: "json" };
 import student from "./student.json" with { type: "json" };
 import business from "./business.json" with { type: "json" };
+import circle from "./circle.json" with { type: "json" };
 
-export interface VerticalTemplate {
-  vertical: WorkspaceVertical;
+export type TemplateId = WorkspaceVertical | "circle";
+
+export interface WorkspaceTemplate {
+  id: TemplateId;
   labels: {
     workspace: string;
     participant: string;
@@ -22,14 +26,28 @@ export interface VerticalTemplate {
     actionType: ActionType;
     actionPayload: Record<string, unknown>;
   }[];
+  taskLists: { key: string; name: string; viewerCanAdd: boolean }[];
+  shoppingLists: { key: string; name: string; preferredRetailer: Retailer | null }[];
+  /** Suggested ShoppingItem.category values (store sections), in shopping-trip order. */
+  shoppingCategories: string[];
+  /** Seasonal/recurring reminders; users can edit dates, disable, or delete them. */
+  recurringReminders: {
+    title: string;
+    category: string;
+    rrule: string;
+    leadDays: number;
+    taskListKey: string | null;
+  }[];
 }
 
-export const verticalTemplates: Record<WorkspaceVertical, VerticalTemplate> = {
-  family: family as VerticalTemplate,
-  student: student as VerticalTemplate,
-  business: business as VerticalTemplate,
+export const workspaceTemplates: Record<TemplateId, WorkspaceTemplate> = {
+  family: family as WorkspaceTemplate,
+  student: student as WorkspaceTemplate,
+  business: business as WorkspaceTemplate,
+  circle: circle as WorkspaceTemplate,
 };
 
-export function getVerticalTemplate(vertical: WorkspaceVertical): VerticalTemplate {
-  return verticalTemplates[vertical];
+/** Circles share one template whatever their vertical; homes use their vertical's. */
+export function getWorkspaceTemplate(kind: WorkspaceKind, vertical: WorkspaceVertical): WorkspaceTemplate {
+  return workspaceTemplates[kind === "circle" ? "circle" : vertical];
 }

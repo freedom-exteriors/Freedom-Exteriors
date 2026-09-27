@@ -20,10 +20,21 @@ enum WorkspaceVertical {
   business
 }
 
+// home   = a household / student / business's own space.
+// circle = a shared planning space between several homes (carpool group, team parents,
+//          two families planning a trip). Same tables, same auth boundary; its
+//          Participants stand for the member homes (see Participant.linkedWorkspaceId).
+// Joining a circle never exposes a home's own calendar — only what's put in the circle.
+enum WorkspaceKind {
+  home
+  circle
+}
+
 model Workspace {
   id                  String                  @id @default(uuid()) @db.Uuid // random v4 — doubles as the unguessable wall-display URL segment (v1 only)
   name                String
   vertical            WorkspaceVertical
+  kind                WorkspaceKind           @default(home)
   participants        Participant[]
   contacts            Contact[]
   calendarSources     CalendarSource[]
@@ -32,16 +43,29 @@ model Workspace {
   eventTagDefinitions EventTagDefinition[]
   uploadedSchedules   UploadedScheduleImage[]
   memberships         WorkspaceMembership[]
+  taskLists           TaskList[]
+  shoppingLists       ShoppingList[]
+  goals               Goal[]
+  recurringReminders  RecurringReminder[]
+  invites             WorkspaceInvite[]
+  // In circles: the Participant rows that represent this home.
+  representedIn       Participant[]           @relation("LinkedWorkspace")
   createdAt           DateTime                @default(now()) @db.Timestamptz(3)
 }
 
 model User {
-  id           String                @id @default(uuid()) @db.Uuid
-  email        String                @unique // stored lowercased by the app
-  passwordHash String // argon2id
-  memberships  WorkspaceMembership[]
-  sessions     Session[]
-  createdAt    DateTime              @default(now()) @db.Timestamptz(3)
+  id                  String                @id @default(uuid()) @db.Uuid
+  email               String                @unique // stored lowercased by the app
+  passwordHash        String // argon2id
+  memberships         WorkspaceMembership[]
+  sessions            Session[]
+  invitesSent         WorkspaceInvite[]
+  // Attribution only ("added by Sam") — never used for authorization.
+  tasksCreated        Task[]                @relation("TaskCreatedBy")
+  tasksCompleted      Task[]                @relation("TaskCompletedBy")
+  shoppingItemsAdded  ShoppingItem[]        @relation("ShoppingItemAddedBy")
+  shoppingItemsBought ShoppingItem[]        @relation("ShoppingItemCheckedBy")
+  createdAt           DateTime              @default(now()) @db.Timestamptz(3)
 }
 
 // Server-side session store. `id` is the SHA-256 of the session token handed to the
@@ -78,6 +102,24 @@ model WorkspaceMembership {
   @@index([workspaceId])
 }
 
+// Invite link / email to join a workspace: a second parent into a home, or a family
+// into a circle. Only the SHA-256 of the token is stored.
+model WorkspaceInvite {
+  id              String         @id @default(uuid()) @db.Uuid
+  workspaceId     String         @db.Uuid
+  workspace       Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  tokenHash       String         @unique
+  email           String? // optional: restrict to this address
+  role            MembershipRole
+  invitedByUserId String         @db.Uuid
+  invitedBy       User           @relation(fields: [invitedByUserId], references: [id], onDelete: Cascade)
+  expiresAt       DateTime       @db.Timestamptz(3)
+  acceptedAt      DateTime?      @db.Timestamptz(3)
+  createdAt       DateTime       @default(now()) @db.Timestamptz(3)
+
+  @@index([workspaceId])
+}
+
 // ───────────────────────── People ─────────────────────────
 
 model Participant {
@@ -86,12 +128,18 @@ model Participant {
   workspace         Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   name              String
   color             String // hex, e.g. "#3B82F6"
+  // Circles only: the home workspace this participant stands for ("Chen family").
+  linkedWorkspaceId String?              @db.Uuid
+  linkedWorkspace   Workspace?           @relation("LinkedWorkspace", fields: [linkedWorkspaceId], references: [id], onDelete: SetNull)
   events            Event[]
   assignedTasks     Task[]               @relation("AssignedTasks")
   defaultForSources CalendarSource[]     @relation("DefaultParticipant")
   membership        WorkspaceMembership?
+  goals             Goal[]
+  reminders         RecurringReminder[]
   createdAt         DateTime             @default(now()) @db.Timestamptz(3)
 
+  @@unique([workspaceId, linkedWorkspaceId])
   @@index([workspaceId])
 }
 
@@ -218,24 +266,180 @@ model AutomationRule {
   @@index([workspaceId])
 }
 
+enum TaskPriority {
+  low
+  normal
+  high
+}
+
+// The one to-do primitive. A task can come from a person (a honey-do item), from the
+// rule engine (automationRuleId + eventId), or from a recurring reminder
+// (recurringReminderId + occurrenceDate). It can optionally sit on a TaskList and/or
+// count toward a Goal. Tasks with no list show up in the dashboard's general task view.
 model Task {
-  id                    String          @id @default(uuid()) @db.Uuid
-  workspaceId           String          @db.Uuid
-  workspace             Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  eventId               String?         @db.Uuid
-  event                 Event?          @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  id                    String             @id @default(uuid()) @db.Uuid
+  workspaceId           String             @db.Uuid
+  workspace             Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  taskListId            String?            @db.Uuid
+  taskList              TaskList?          @relation(fields: [taskListId], references: [id], onDelete: SetNull)
+  goalId                String?            @db.Uuid // a step toward this goal
+  goal                  Goal?              @relation(fields: [goalId], references: [id], onDelete: SetNull)
+  eventId               String?            @db.Uuid
+  event                 Event?             @relation(fields: [eventId], references: [id], onDelete: Cascade)
   // Set when generated by the rule engine; with eventId it makes the scheduled job idempotent.
-  automationRuleId      String?         @db.Uuid
-  automationRule        AutomationRule? @relation(fields: [automationRuleId], references: [id], onDelete: SetNull)
-  assignedParticipantId String?         @db.Uuid
-  assignedParticipant   Participant?    @relation("AssignedTasks", fields: [assignedParticipantId], references: [id], onDelete: SetNull)
+  automationRuleId      String?            @db.Uuid
+  automationRule        AutomationRule?    @relation(fields: [automationRuleId], references: [id], onDelete: SetNull)
+  // Set when generated by a recurring/seasonal reminder, for the occurrence it covers.
+  recurringReminderId   String?            @db.Uuid
+  recurringReminder     RecurringReminder? @relation(fields: [recurringReminderId], references: [id], onDelete: SetNull)
+  occurrenceDate        DateTime?          @db.Date
+  assignedParticipantId String?            @db.Uuid
+  assignedParticipant   Participant?       @relation("AssignedTasks", fields: [assignedParticipantId], references: [id], onDelete: SetNull)
   title                 String
-  dueAt                 DateTime?       @db.Timestamptz(3)
-  completedAt           DateTime?       @db.Timestamptz(3)
-  createdAt             DateTime        @default(now()) @db.Timestamptz(3)
+  notes                 String?
+  priority              TaskPriority       @default(normal)
+  position              Float              @default(0) // manual ordering within a list
+  dueAt                 DateTime?          @db.Timestamptz(3)
+  completedAt           DateTime?          @db.Timestamptz(3)
+  createdByUserId       String?            @db.Uuid
+  createdBy             User?              @relation("TaskCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  completedByUserId     String?            @db.Uuid
+  completedBy           User?              @relation("TaskCompletedBy", fields: [completedByUserId], references: [id], onDelete: SetNull)
+  createdAt             DateTime           @default(now()) @db.Timestamptz(3)
 
   @@unique([automationRuleId, eventId])
+  @@unique([recurringReminderId, occurrenceDate])
   @@index([workspaceId, completedAt])
+  @@index([taskListId, position])
+  @@index([goalId])
+}
+
+// A named to-do list: "Honey-do", "Chores", "Packing list", "Maintenance".
+model TaskList {
+  id           String              @id @default(uuid()) @db.Uuid
+  workspaceId  String              @db.Uuid
+  workspace    Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  key          String? // set for template-seeded lists so reminders can target them; null for user-made lists
+  name         String
+  // Lets `viewer` members (e.g. kids) add and check off items here, while
+  // everything else stays read-only for them.
+  viewerCanAdd Boolean             @default(false)
+  position     Float               @default(0)
+  tasks        Task[]
+  reminders    RecurringReminder[]
+  archivedAt   DateTime?           @db.Timestamptz(3)
+  createdAt    DateTime            @default(now()) @db.Timestamptz(3)
+
+  @@unique([workspaceId, key])
+}
+
+// ───────────────────────── Shopping ─────────────────────────
+
+enum Retailer {
+  amazon
+  target
+  walmart
+  kroger
+  instacart
+}
+
+model ShoppingList {
+  id                String         @id @default(uuid()) @db.Uuid
+  workspaceId       String         @db.Uuid
+  workspace         Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  key               String?
+  name              String // "Groceries", "Costco run", "Dorm supplies", "Supply order"
+  preferredRetailer Retailer?
+  viewerCanAdd      Boolean        @default(true)
+  position          Float          @default(0)
+  items             ShoppingItem[]
+  archivedAt        DateTime?      @db.Timestamptz(3)
+  createdAt         DateTime       @default(now()) @db.Timestamptz(3)
+
+  @@unique([workspaceId, key])
+}
+
+model ShoppingItem {
+  id              String       @id @default(uuid()) @db.Uuid
+  shoppingListId  String       @db.Uuid
+  shoppingList    ShoppingList @relation(fields: [shoppingListId], references: [id], onDelete: Cascade)
+  name            String
+  quantity        String? // free text: "2", "1 lb", "family size"
+  category        String? // store section; suggestions come from the vertical template
+  notes           String?
+  // A staple stays on the list after it's checked off, so it can be re-added in one tap.
+  isStaple        Boolean      @default(false)
+  // Product identifiers used for retailer handoff, keyed by Retailer, e.g.
+  // { "amazon": { "asin": "B00..." }, "target": { "tcin": "13..." }, "kroger": { "upc": "..." } }
+  retailerRefs    Json?
+  position        Float        @default(0)
+  checkedAt       DateTime?    @db.Timestamptz(3)
+  addedByUserId   String?      @db.Uuid
+  addedBy         User?        @relation("ShoppingItemAddedBy", fields: [addedByUserId], references: [id], onDelete: SetNull)
+  checkedByUserId String?      @db.Uuid
+  checkedBy       User?        @relation("ShoppingItemCheckedBy", fields: [checkedByUserId], references: [id], onDelete: SetNull)
+  createdAt       DateTime     @default(now()) @db.Timestamptz(3)
+
+  @@index([shoppingListId, checkedAt])
+}
+
+// ───────────────────────── Goals ─────────────────────────
+
+enum GoalHorizon {
+  short_term // weeks to a few months
+  long_term // a year or more
+}
+
+enum GoalStatus {
+  active
+  achieved
+  dropped
+}
+
+// Progress = completed Tasks with this goalId / all Tasks with this goalId (the milestones).
+model Goal {
+  id            String       @id @default(uuid()) @db.Uuid
+  workspaceId   String       @db.Uuid
+  workspace     Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  participantId String?      @db.Uuid // null = shared goal for the whole workspace
+  participant   Participant? @relation(fields: [participantId], references: [id], onDelete: SetNull)
+  title         String
+  description   String?
+  horizon       GoalHorizon
+  status        GoalStatus   @default(active)
+  targetDate    DateTime?    @db.Date
+  position      Float        @default(0)
+  milestones    Task[]
+  achievedAt    DateTime?    @db.Timestamptz(3)
+  createdAt     DateTime     @default(now()) @db.Timestamptz(3)
+
+  @@index([workspaceId, status])
+}
+
+// ───────────────────────── Recurring / seasonal reminders ─────────────────────────
+
+// "Replace HVAC filter every 3 months", "Clean gutters each October", "Quarterly
+// estimated taxes". Not calendar events: the reminder job creates one Task per
+// occurrence, `leadDays` before it's due, with (recurringReminderId, occurrenceDate)
+// as the idempotency key.
+model RecurringReminder {
+  id                    String       @id @default(uuid()) @db.Uuid
+  workspaceId           String       @db.Uuid
+  workspace             Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  title                 String
+  notes                 String?
+  category              String? // "home", "car", "health", "school", "finance"… (template-suggested)
+  rrule                 String // RFC 5545 RRULE, e.g. "FREQ=YEARLY;BYMONTH=10;BYMONTHDAY=15"
+  leadDays              Int          @default(7)
+  taskListId            String?      @db.Uuid // generated tasks land on this list (e.g. Honey-do)
+  taskList              TaskList?    @relation(fields: [taskListId], references: [id], onDelete: SetNull)
+  assignedParticipantId String?      @db.Uuid
+  assignedParticipant   Participant? @relation(fields: [assignedParticipantId], references: [id], onDelete: SetNull)
+  enabled               Boolean      @default(true)
+  tasks                 Task[]
+  createdAt             DateTime     @default(now()) @db.Timestamptz(3)
+
+  @@index([workspaceId, enabled])
 }
 
 // ───────────────────────── Photo extraction ─────────────────────────

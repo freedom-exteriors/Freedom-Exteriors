@@ -4,7 +4,7 @@ import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
 import { config as loadEnv } from "dotenv";
-import { createPrismaClient, createWorkspaceFromTemplate } from "../src/index.js";
+import { addHomeToCircle, createPrismaClient, createWorkspaceFromTemplate } from "../src/index.js";
 
 loadEnv({ path: path.resolve(import.meta.dirname, "../../../.env") });
 const prisma = createPrismaClient();
@@ -61,6 +61,40 @@ test("rule engine cannot create the same task twice for one rule+event", async (
   });
 });
 
+test("template seeding creates lists and seasonal reminders on their target lists", async () => {
+  await withWorkspace(async (workspaceId) => {
+    const honeyDo = await prisma.taskList.findUniqueOrThrow({ where: { workspaceId_key: { workspaceId, key: "honey_do" } } });
+    assert.ok(await prisma.shoppingList.count({ where: { workspaceId, key: "groceries" } }));
+    assert.ok(await prisma.recurringReminder.count({ where: { workspaceId, taskListId: honeyDo.id } }) > 0);
+  });
+});
+
+test("a recurring reminder generates at most one task per occurrence", async () => {
+  await withWorkspace(async (workspaceId) => {
+    const reminder = await prisma.recurringReminder.findFirstOrThrow({ where: { workspaceId } });
+    const data = { workspaceId, recurringReminderId: reminder.id, occurrenceDate: new Date("2026-10-15"), title: reminder.title };
+    await prisma.task.create({ data });
+    await assert.rejects(prisma.task.create({ data }), /Unique constraint/);
+    await prisma.task.create({ data: { ...data, occurrenceDate: new Date("2027-10-15") } });
+  });
+});
+
+test("goal progress is derived from its milestone tasks", async () => {
+  await withWorkspace(async (workspaceId) => {
+    const goal = await prisma.goal.create({
+      data: {
+        workspaceId, title: "Clean garage", horizon: "short_term",
+        milestones: { create: [{ workspaceId, title: "a", completedAt: new Date() }, { workspaceId, title: "b" }] },
+      },
+    });
+    const [done, total] = await Promise.all([
+      prisma.task.count({ where: { goalId: goal.id, completedAt: { not: null } } }),
+      prisma.task.count({ where: { goalId: goal.id } }),
+    ]);
+    assert.deepEqual([done, total], [1, 2]);
+  });
+});
+
 test("a participant can be claimed by at most one login", async () => {
   await withWorkspace(async (workspaceId) => {
     const p = await prisma.participant.create({ data: { workspaceId, name: "Kid", color: "#000000" } });
@@ -86,4 +120,22 @@ test("deleting a workspace cascades to its events and tasks", async () => {
   await prisma.workspace.delete({ where: { id: ws.id } });
   assert.equal(await prisma.event.count({ where: { id: ev.id } }), 0);
   assert.equal(await prisma.task.count({ where: { workspaceId: ws.id } }), 0);
+});
+
+test("a home joins a circle once, and only homes can join circles", async () => {
+  const [home, otherHome, circle] = await Promise.all([
+    createWorkspaceFromTemplate(prisma, { name: "home-a", vertical: "family" }),
+    createWorkspaceFromTemplate(prisma, { name: "home-b", vertical: "family" }),
+    createWorkspaceFromTemplate(prisma, { name: "circle", vertical: "family", kind: "circle" }),
+  ]);
+  try {
+    assert.equal(circle.kind, "circle");
+    assert.ok(await prisma.taskList.count({ where: { workspaceId: circle.id, key: "bring_list" } }));
+    await addHomeToCircle(prisma, { circleId: circle.id, homeWorkspaceId: home.id, color: "#111111" });
+    await assert.rejects(addHomeToCircle(prisma, { circleId: circle.id, homeWorkspaceId: home.id, color: "#111111" }), /Unique constraint/);
+    await assert.rejects(addHomeToCircle(prisma, { circleId: otherHome.id, homeWorkspaceId: home.id, color: "#111111" }), /not a circle/);
+    await assert.rejects(addHomeToCircle(prisma, { circleId: circle.id, homeWorkspaceId: circle.id, color: "#111111" }), /only homes/);
+  } finally {
+    await prisma.workspace.deleteMany({ where: { id: { in: [home.id, otherHome.id, circle.id] } } });
+  }
 });

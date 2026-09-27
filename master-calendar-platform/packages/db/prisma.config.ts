@@ -14,5 +14,7 @@ export default defineConfig({
   datasource: {
     // Migrations need a direct (non-pgbouncer) connection on Supabase.
     url: process.env.DIRECT_URL ?? process.env.DATABASE_URL ?? "",
+    // Scratch DB used by `migrate diff` / `migrate dev` to replay migrations.
+    shadowDatabaseUrl: process.env.SHADOW_DATABASE_URL,
   },
 });

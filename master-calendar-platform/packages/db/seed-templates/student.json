@@ -1,5 +1,5 @@
 {
-  "vertical": "student",
+  "id": "student",
   "labels": {
     "workspace": "My calendar",
     "participant": "Person",
@@ -7,32 +7,150 @@
     "contact": "Contact"
   },
   "eventTags": [
-    { "key": "class", "label": "Class", "color": "#3B82F6" },
-    { "key": "assignment", "label": "Assignment due", "color": "#F59E0B" },
-    { "key": "exam", "label": "Exam", "color": "#EF4444" },
-    { "key": "study_group", "label": "Study group", "color": "#22C55E" },
-    { "key": "office_hours", "label": "Office hours", "color": "#14B8A6" },
-    { "key": "extracurricular", "label": "Extracurricular", "color": "#A855F7" }
+    {
+      "key": "class",
+      "label": "Class",
+      "color": "#3B82F6"
+    },
+    {
+      "key": "assignment",
+      "label": "Assignment due",
+      "color": "#F59E0B"
+    },
+    {
+      "key": "exam",
+      "label": "Exam",
+      "color": "#EF4444"
+    },
+    {
+      "key": "study_group",
+      "label": "Study group",
+      "color": "#22C55E"
+    },
+    {
+      "key": "office_hours",
+      "label": "Office hours",
+      "color": "#14B8A6"
+    },
+    {
+      "key": "extracurricular",
+      "label": "Extracurricular",
+      "color": "#A855F7"
+    }
   ],
-  "contactRoles": ["professor", "teacher", "advisor", "tutor", "TA", "coach", "classmate", "other"],
+  "contactRoles": [
+    "professor",
+    "teacher",
+    "advisor",
+    "tutor",
+    "TA",
+    "coach",
+    "classmate",
+    "other"
+  ],
   "automationRules": [
     {
       "tagKey": "exam",
       "timingOffsetMinutes": 4320,
       "actionType": "create_reminder",
-      "actionPayload": { "titleTemplate": "Start studying for {{title}}" }
+      "actionPayload": {
+        "titleTemplate": "Start studying for {{title}}"
+      }
     },
     {
       "tagKey": "assignment",
       "timingOffsetMinutes": 1440,
       "actionType": "create_reminder",
-      "actionPayload": { "titleTemplate": "Finish & submit: {{title}}" }
+      "actionPayload": {
+        "titleTemplate": "Finish & submit: {{title}}"
+      }
     },
     {
       "tagKey": "study_group",
       "timingOffsetMinutes": 1440,
       "actionType": "flag_unassigned_task",
-      "actionPayload": { "titleTemplate": "Who's attending {{title}}?" }
+      "actionPayload": {
+        "titleTemplate": "Who's attending {{title}}?"
+      }
+    }
+  ],
+  "taskLists": [
+    {
+      "key": "todo",
+      "name": "To-do",
+      "viewerCanAdd": false
+    },
+    {
+      "key": "packing",
+      "name": "Packing list",
+      "viewerCanAdd": true
+    }
+  ],
+  "shoppingLists": [
+    {
+      "key": "groceries",
+      "name": "Groceries",
+      "preferredRetailer": null
+    },
+    {
+      "key": "dorm",
+      "name": "Dorm & school supplies",
+      "preferredRetailer": "amazon"
+    }
+  ],
+  "shoppingCategories": [
+    "Food",
+    "Snacks",
+    "Beverages",
+    "Toiletries",
+    "Cleaning",
+    "School supplies",
+    "Dorm",
+    "Tech",
+    "Other"
+  ],
+  "recurringReminders": [
+    {
+      "title": "FAFSA opens — submit early",
+      "category": "finance",
+      "rrule": "FREQ=YEARLY;BYMONTH=10;BYMONTHDAY=1",
+      "leadDays": 7,
+      "taskListKey": "todo"
+    },
+    {
+      "title": "Check spring registration window & meet advisor",
+      "category": "school",
+      "rrule": "FREQ=YEARLY;BYMONTH=10;BYMONTHDAY=20",
+      "leadDays": 14,
+      "taskListKey": "todo"
+    },
+    {
+      "title": "Check fall registration window & meet advisor",
+      "category": "school",
+      "rrule": "FREQ=YEARLY;BYMONTH=3;BYMONTHDAY=20",
+      "leadDays": 14,
+      "taskListKey": "todo"
+    },
+    {
+      "title": "Housing application for next year",
+      "category": "school",
+      "rrule": "FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=1",
+      "leadDays": 14,
+      "taskListKey": "todo"
+    },
+    {
+      "title": "Scholarship applications & renewals",
+      "category": "finance",
+      "rrule": "FREQ=YEARLY;BYMONTH=1;BYMONTHDAY=15",
+      "leadDays": 14,
+      "taskListKey": "todo"
+    },
+    {
+      "title": "Back up laptop & coursework",
+      "category": "tech",
+      "rrule": "FREQ=MONTHLY;BYMONTHDAY=1",
+      "leadDays": 0,
+      "taskListKey": "todo"
     }
   ]
 }
