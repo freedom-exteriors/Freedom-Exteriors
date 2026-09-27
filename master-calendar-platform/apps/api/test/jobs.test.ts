@@ -6,7 +6,7 @@ import { Client, makeApp, prisma } from "./helpers.js";
 import { runAutomation } from "../src/jobs/automation.js";
 import { runReminders } from "../src/jobs/reminders.js";
 import { estimateOnlyTraffic, runDepartures } from "../src/jobs/departures.js";
-import { deliverPending, type EmailSender } from "../src/jobs/notify.js";
+import { deliverPending, notify, type EmailSender, type PushSender } from "../src/jobs/notify.js";
 import { JobScheduler } from "../src/jobs/scheduler.js";
 
 // A fixed moment far from any real data: Mon 3 Mar 2031, 12:00 UTC (6 AM in Chicago).
@@ -178,6 +178,35 @@ test("email delivery: opted-in only, stale alerts dropped, failures recorded", a
     assert.equal(r.sent, 1);
     assert.deepEqual(sent.map((s) => s.subject), ["fresh"]);
     assert.equal((await prisma.notification.findFirstOrThrow({ where: { userId: u.id, dedupeKey: "stale" } })).error, "expired before it could be sent");
+  } finally {
+    await prisma.user.delete({ where: { id: u.id } });
+    await f.cleanup();
+  }
+});
+
+test("web push: fans out to each device, drops dead ones, never sends twice", async () => {
+  const f = await family();
+  const u = await prisma.user.create({ data: { email: `jobs-push-${crypto.randomUUID().slice(0, 6)}@api-test.test`, passwordHash: "x" } });
+  try {
+    const sub = (name: string) => ({ userId: u.id, endpoint: `https://push.example/${name}-${crypto.randomUUID()}`, p256dh: "p".repeat(20), auth: "a".repeat(10) });
+    const phone = await prisma.pushSubscription.create({ data: sub("phone") });
+    const oldTablet = await prisma.pushSubscription.create({ data: sub("tablet") });
+    const got: { endpoint: string; title: string; ttl: number }[] = [];
+    const push: PushSender = {
+      async send(s, payload, ttl) {
+        if (s.endpoint === oldTablet.endpoint) return "gone";
+        got.push({ endpoint: s.endpoint, title: payload.title, ttl });
+        return "ok";
+      },
+    };
+    const n = { workspaceId: f.ws.id, userIds: [u.id], kind: "leave_by", title: "Leave by 3:45 PM — Soccer", body: "…", dedupeKey: "k1", now: NOW };
+    assert.equal(await notify(prisma, n), 2, "in-app + push (no email: not opted in)");
+    assert.equal(await notify(prisma, n), 0, "deduped");
+    assert.equal((await deliverPending(prisma, { email: null, push, now: min(1) })).sent, 1);
+    assert.deepEqual(got.map((g) => [g.endpoint, g.title]), [[phone.endpoint, "Leave by 3:45 PM — Soccer"]]);
+    assert.ok(got[0]!.ttl <= 29 * 60 && got[0]!.ttl > 0, "expires with the alert");
+    assert.equal(await prisma.pushSubscription.count({ where: { id: oldTablet.id } }), 0, "dead device removed");
+    assert.equal((await deliverPending(prisma, { email: null, push, now: min(2) })).sent, 0);
   } finally {
     await prisma.user.delete({ where: { id: u.id } });
     await f.cleanup();

@@ -14,7 +14,11 @@
     "db:reset": "npm run reset -w @mcp/db",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
-    "demo:organizer": "tsx scripts/demo-organizer.ts"
+    "demo:organizer": "tsx scripts/demo-organizer.ts",
+    "dev:api": "npm run dev -w @mcp/api",
+    "dev:worker": "npm run worker -w @mcp/api",
+    "dev:web": "npm run dev -w @mcp/web",
+    "e2e": "npm run e2e -w @mcp/web"
   },
   "engines": {
     "node": ">=20.19"

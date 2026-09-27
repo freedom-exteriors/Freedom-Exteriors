@@ -18,6 +18,9 @@ const schema = z.object({
   SUPABASE_STORAGE_BUCKET: z.string().default("schedule-photos"),
   PHOTO_DIR: z.string().optional(),
   RESEND_API_KEY: z.string().optional(),
+  VAPID_PUBLIC_KEY: z.string().optional(),
+  VAPID_PRIVATE_KEY: z.string().optional(),
+  VAPID_SUBJECT: z.string().default("mailto:admin@example.com"),
   NOTIFY_FROM_EMAIL: z.string().default("Home Base <alerts@example.com>"),
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
@@ -45,6 +48,8 @@ export interface AppConfig {
   photoDir: string;
   /** Email delivery for notifications; null → in-app only. */
   email: { resendApiKey: string; from: string } | null;
+  /** Web Push keys (npx web-push generate-vapid-keys); null disables push. */
+  vapid: { publicKey: string; privateKey: string; subject: string } | null;
   /** Google OAuth client; null disables "Connect Google Calendar". */
   google: { clientId: string; clientSecret: string; redirectUri: string } | null;
 }
@@ -67,6 +72,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       c.SUPABASE_URL && c.SUPABASE_SERVICE_ROLE_KEY
         ? { url: c.SUPABASE_URL, serviceRoleKey: c.SUPABASE_SERVICE_ROLE_KEY, bucket: c.SUPABASE_STORAGE_BUCKET }
         : null,
+    vapid: c.VAPID_PUBLIC_KEY && c.VAPID_PRIVATE_KEY ? { publicKey: c.VAPID_PUBLIC_KEY, privateKey: c.VAPID_PRIVATE_KEY, subject: c.VAPID_SUBJECT } : null,
     email: c.RESEND_API_KEY ? { resendApiKey: c.RESEND_API_KEY, from: c.NOTIFY_FROM_EMAIL } : null,
     photoDir: c.PHOTO_DIR || new URL("../.data/photos", import.meta.url).pathname,
     google:

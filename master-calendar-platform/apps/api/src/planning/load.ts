@@ -38,7 +38,17 @@ export async function loadPlanningData(prisma: PrismaClient, workspaceId: string
       select: { assignedParticipantId: true, scheduledParticipantId: true, scheduledStart: true, scheduledEnd: true, placeId: true, locationKind: true, title: true },
     }),
     prisma.task.findMany({
-      where: { workspaceId, completedAt: null, OR: [{ scheduleStatus: null }, { scheduleStatus: "suggested" }] },
+      // Plannable to-dos: anything with a time estimate, plus list items (so the planner can
+      // say "add how long it takes"). Goal steps like "Save $8,000" and calendar reminders
+      // like "Pack uniform" aren't time blocks unless someone gives them a duration.
+      where: {
+        workspaceId,
+        completedAt: null,
+        AND: [
+          { OR: [{ scheduleStatus: null }, { scheduleStatus: "suggested" }] },
+          { OR: [{ estimatedMinutes: { not: null } }, { taskListId: { not: null } }] },
+        ],
+      },
       select: { id: true, title: true, assignedParticipantId: true, estimatedMinutes: true, priority: true, dueAt: true, locationKind: true, placeId: true },
     }),
   ]);

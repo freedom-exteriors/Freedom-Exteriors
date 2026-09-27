@@ -27,8 +27,8 @@ React web app · Supabase Storage for photos · Vercel (web) + Railway (API + cr
 | 8 | Scheduled jobs: automation rule engine, seasonal reminders, **leave-by traffic alerts**, notification sender | ✅ done |
 | 8b | ~~Schedule organizer API~~ | folded into step 6 |
 | 9 | Retailer handoff (see below) | *new* |
-| 10 | Dashboard frontend (+ web push for leave-by alerts) | next |
-| 11 | Wall/kiosk route (+ today's chores and the grocery list) | |
+| 10 | Dashboard frontend (+ web push for leave-by alerts) | ✅ done |
+| 11 | Wall/kiosk route (+ today's chores and the grocery list) | next |
 
 ## Local setup
 
@@ -39,8 +39,12 @@ npm install                                         # also runs `prisma generate
 npm run db:deploy                                   # apply migrations
 npm run db:seed                                     # one workspace per vertical
 npm test                                            # db, planner and API tests
-npm run dev -w @mcp/api                             # API on :3001
-npm run worker -w @mcp/api                          # background jobs (see "Background jobs")
+
+# three terminals:
+npm run dev:api                                     # API on :3001
+npm run dev:worker                                  # background jobs (see "Background jobs")
+npm run dev:web                                     # web app on http://localhost:5173
+npm run e2e                                         # browser smoke test (needs all of the above + a fresh seed)
 ```
 
 `npm run db:migrate` creates a new migration after you edit `schema.prisma`.
@@ -482,6 +486,71 @@ cadence; one failing never stops the others. Every job is **idempotent** (unique
   now" email an hour late is worse than none.
 - **Web push** (a phone buzz for leave-by) needs the web app's service worker, so it
   ships with the dashboard.
+
+## Dashboard (web app) — step 10
+
+`apps/web`: React 19 + Vite + TypeScript, no UI framework, about 100 KB gzipped. The
+browser only talks to its own origin: `/api/*` is proxied to the API by Vite in dev and
+rewritten to Railway by Vercel in prod (`apps/web/vercel.json`), so the session cookie is
+first-party and there's no CORS. All times are shown in the **household's** time zone,
+whatever the device's zone, using the same `@mcp/planner` code as the server.
+
+| Screen | What's there |
+|---|---|
+| **Calendar** | Rolling 7-day week (on a Sunday you see the week *ahead*) and month views, color-coded by person. Unassigned events are hatched grey ("Nobody yet"), 🚗? marks events needing a driver, and circle events are labeled. Filter by person or "needs someone". Tapping an event opens a drawer to claim it (who, kind, driver). |
+| **Lists** | Honey-do, chores, custom lists, plus "From the calendar" (automation output). Set who and how long inline. Done items record who did them. |
+| **Shopping** | Grouped by aisle in walking order, ★ staples, clear bought, restock staples, and send to Amazon / Target / Walmart. |
+| **Plan** | Plan today / this week. Suggestions show the reason ("13 min from home, after …: +26 min of driving"); Accept / Move / Dismiss; "couldn't place" lists what needs a time estimate. |
+| **Goals** | Short- and long-term goals with progress bars and tickable steps. |
+| **Photos** | Snap or upload (the phone camera opens directly). The review screen shows the photo beside the candidates; confident ones are pre-ticked, hard-to-read ones are flagged and need a deliberate tick. Edit before adding. |
+| **Settings** | Calendars (add a subscribe link, connect Google and pick calendars, "all of this feed is Maya's", refresh), people (color, drives, free time) and places (by address), members and invite links (owner), notifications (push on this device, email). |
+| **Bell** | In-app notifications with unread count; tapping one jumps to the event. |
+
+**Role-gated:** a `viewer` login shows "view only" and gets no edit controls. The
+exceptions are the ones the API allows: adding to and ticking open lists (groceries,
+chores), ticking their own chores, and uploading a photo for a parent to review.
+
+**Push notifications:**
+- `public/sw.js` is a tiny service worker that shows the alert and, when it's tapped,
+  opens the event.
+- Settings → Notifications subscribes the device (VAPID), and the worker's
+  `notifications` job delivers.
+- Dead devices are pruned. An alert older than 30 minutes isn't delivered at all.
+- Works in Chrome, Edge and Firefox, and on iPhone/iPad (iOS 16.4+) once the app is
+  added to the Home Screen (`manifest.webmanifest` makes it installable).
+
+**Tested in a real browser:** `npm run e2e` drives Chromium (Playwright) against the live
+API, Vite and seeded data. As a parent on a laptop and as a kid on a phone it checks:
+- colors, the unassigned and driver flags, and household-zone times (the browser runs in
+  a *different* zone on purpose);
+- claiming an event, adding groceries, the automation tasks, and planning and accepting;
+- that the kid's view is read-only exactly where it should be.
+
+Screenshots land in `docs/screenshots/`.
+
+![Week view](docs/screenshots/01-calendar-week.png)
+
+## Deploying (when you're ready)
+
+1. **Supabase:** create a *new* project (not the CRM's).
+   - Set `DATABASE_URL` (pooler, port 6543, `?pgbouncer=true`) and `DIRECT_URL`
+     (port 5432).
+   - Run `npm run db:deploy`.
+   - Create a **private** Storage bucket `schedule-photos`.
+2. **Railway:** two services from this repo, sharing the env vars in `.env.example`:
+   - **api** runs `npm run start -w @mcp/api` (health check `/health`).
+   - **worker** runs `npm run worker -w @mcp/api`.
+   - Generate `CREDENTIALS_ENCRYPTION_KEY` and VAPID keys once.
+   - Set `NODE_ENV=production`, `WEB_ORIGIN` and `PUBLIC_WEB_URL` to the Vercel URL, and
+     `GOOGLE_REDIRECT_URI` to `https://<vercel-domain>/api/integrations/google/callback`.
+3. **Vercel:** a *new* project with root directory `master-calendar-platform/apps/web`.
+   - Build command: `npm run build`. Output directory: `dist`.
+   - Put the Railway API URL into `apps/web/vercel.json`.
+4. Optional keys, each unlocking one feature:
+   - `ANTHROPIC_API_KEY`: photo reading.
+   - `GOOGLE_MAPS_API_KEY`: live traffic and address lookup.
+   - `GOOGLE_CLIENT_*`: Google Calendar.
+   - `RESEND_API_KEY`: email.
 
 ## Home hub: lists, goals, reminders
 

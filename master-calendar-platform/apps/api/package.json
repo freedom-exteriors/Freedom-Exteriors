@@ -28,10 +28,12 @@
     "sharp": "^0.35.5",
     "tsx": "^4.20.0",
     "undici": "^8.11.2",
+    "web-push": "^3.6.7",
     "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
+    "@types/web-push": "^3.6.4",
     "typescript": "~5.9.3"
   }
 }

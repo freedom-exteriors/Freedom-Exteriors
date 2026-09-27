@@ -20,7 +20,7 @@ import { photoStoreFor } from "./app.js";
 import { runAutomation } from "./jobs/automation.js";
 import { runReminders } from "./jobs/reminders.js";
 import { estimateOnlyTraffic, runDepartures } from "./jobs/departures.js";
-import { ResendEmailSender, deliverPending } from "./jobs/notify.js";
+import { ResendEmailSender, VapidPushSender, deliverPending } from "./jobs/notify.js";
 import { JobScheduler } from "./jobs/scheduler.js";
 
 loadEnv({ path: path.resolve(import.meta.dirname, "../../../.env") });
@@ -37,13 +37,14 @@ const extraction = {
 };
 const traffic = config.mapsApiKey ? new GoogleRoutesTrafficProvider(config.mapsApiKey) : estimateOnlyTraffic;
 const email = config.email ? new ResendEmailSender(config.email.resendApiKey, config.email.from) : null;
+const push = config.vapid ? new VapidPushSender(config.vapid) : null;
 
 const scheduler = new JobScheduler(
   [
     { name: "feeds", everySeconds: 60, run: () => runDueSyncs(prisma, { fetchFeed, crypter, google, log }) },
     { name: "photos", everySeconds: 60, run: async () => ({ retried: await runPendingExtractions(prisma, extraction) }) },
     { name: "departures", everySeconds: 60, run: () => runDepartures(prisma, { traffic, live: !!config.mapsApiKey }) },
-    { name: "notifications", everySeconds: 60, run: () => deliverPending(prisma, { email }) },
+    { name: "notifications", everySeconds: 60, run: () => deliverPending(prisma, { email, push, publicWebUrl: config.publicWebUrl }) },
     { name: "automation", everySeconds: 300, run: () => runAutomation(prisma) },
     { name: "reminders", everySeconds: 3600, run: () => runReminders(prisma) },
   ],
@@ -59,7 +60,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   });
 }
 
-log("worker started", { liveTraffic: !!config.mapsApiKey, email: !!email, photos: !!extraction.extractor, google: !!google });
+log("worker started", { liveTraffic: !!config.mapsApiKey, email: !!email, push: !!push, photos: !!extraction.extractor, google: !!google });
 while (!stopping) {
   await scheduler.tick();
   await new Promise((r) => setTimeout(r, 15_000));

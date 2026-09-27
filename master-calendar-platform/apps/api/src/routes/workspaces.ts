@@ -73,6 +73,11 @@ export async function workspaceRoutes(app: FastifyInstance) {
       orderBy: { createdAt: "asc" },
     });
     const template = getWorkspaceTemplate(ws.kind, ws.vertical);
+    const tags = await app.prisma.eventTagDefinition.findMany({
+      where: { workspaceId: ws.id },
+      select: { id: true, key: true, label: true, color: true },
+      orderBy: { createdAt: "asc" },
+    });
     return {
       id: ws.id,
       name: ws.name,
@@ -82,6 +87,7 @@ export async function workspaceRoutes(app: FastifyInstance) {
       myRole: m.role,
       myParticipantId: m.participantId,
       participants,
+      tags,
       // UI copy & pickers come from the template — the app never branches on vertical.
       labels: template.labels,
       contactRoles: template.contactRoles,

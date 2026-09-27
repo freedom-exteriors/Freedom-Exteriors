@@ -55,7 +55,10 @@ test("organizer: plan → suggestions (not assignments) → accept → re-plan k
   const T = `/workspaces/${ws}/tasks`;
   const hinge = (await c.post(T, { title: "Fix hinge", estimatedMinutes: 20 })).json();
   const pickup = (await c.post(T, { title: "Target pickup", estimatedMinutes: 20, locationKind: "errand", placeId: target.id })).json();
-  const vague = (await c.post(T, { title: "Organize garage" })).json();
+  const honeyDo = (await c.get(`/workspaces/${ws}/task-lists`)).json().find((l: { key: string }) => l.key === "honey_do").id;
+  const vague = (await c.post(T, { title: "Organize garage", taskListId: honeyDo })).json();
+  // A goal step with no duration isn't a time block: the planner leaves it alone, silently.
+  await c.post(`/workspaces/${ws}/goals`, { title: "Japan trip", horizon: "long_term", milestones: ["Save $8,000"] });
 
   const date = tomorrow();
   const plan = await c.post(`/workspaces/${ws}/plan`, { scope: "day", date });

@@ -69,6 +69,7 @@ model User {
   memberships         WorkspaceMembership[]
   sessions            Session[]
   notifications       Notification[]
+  pushSubscriptions   PushSubscription[]
   uploadedSchedules   UploadedScheduleImage[]
   invitesSent         WorkspaceInvite[]
   oauthConnections    OAuthConnection[]
@@ -715,4 +716,20 @@ model OAuthState {
   workspace    Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   expiresAt    DateTime      @db.Timestamptz(3)
   createdAt    DateTime      @default(now()) @db.Timestamptz(3)
+}
+
+// A browser/phone that asked for push notifications (Web Push, VAPID). One person can
+// have several devices; dead endpoints (404/410 from the push service) are deleted.
+model PushSubscription {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @db.Uuid
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint   String    @unique
+  p256dh     String
+  auth       String
+  userAgent  String?
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+  lastUsedAt DateTime? @db.Timestamptz(3)
+
+  @@index([userId])
 }
