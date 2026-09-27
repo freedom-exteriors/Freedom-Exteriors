@@ -21,8 +21,8 @@ React web app · Supabase Storage for photos · Vercel (web) + Railway (API + cr
 | 2 | Auth (email + password, DB sessions, membership-scoped middleware) + invites (second parent, join a circle) | ✅ done |
 | 3 | ICS feed parser + subscription job | ✅ done |
 | 4 | Google Calendar OAuth + sync | ✅ done |
-| 5 | Unified event query endpoint (incl. circle events assigned to your household) | next |
-| 6 | Lists & goals API: shopping lists, task lists, goals with milestones | *new* |
+| 5 | Unified event query endpoint (incl. circle events assigned to your household) | ✅ done |
+| 6 | Lists & goals API: shopping lists, task lists, goals with milestones | *new* · next |
 | 7 | Photo extraction → review → confirm | |
 | 8 | Scheduled jobs: automation rule engine, seasonal reminders, **leave-by traffic alerts**, notification sender | *expanded* |
 | 8b | **Schedule organizer** API: daily/weekly plan, accept/move suggestions (engine already built in `packages/planner`) | *new* |
@@ -234,6 +234,49 @@ testing-mode apps after about 7 days, so people would have to reconnect weekly. 
 handles this gracefully (the reconnect prompt above). For real users, submit the app for
 Google's verification: `calendar.readonly` is a *sensitive* scope, which means a review
 of the app, not the paid security assessment that *restricted* scopes need.
+
+## Unified calendar — step 5
+
+`GET /workspaces/:id/events?start=…&end=…` (viewer+; ISO times; up to 100 days) returns
+one time-ordered list from **every** source (ICS feeds, Google, photo imports later),
+ready to draw:
+
+```jsonc
+{
+  "timeZone": "America/Chicago",
+  "participants": [{ "id": "…", "name": "Maya", "color": "#DB2777" }],   // legend
+  "events": [{
+    "id": "…", "title": "U12 Soccer Practice", "start": "…", "end": "…", "allDay": false,
+    "location": "Eastside Park Field 3", "description": "…", "url": "…",
+    "participant": { "id": "…", "name": "Maya", "color": "#DB2777" },   // null when…
+    "unassigned": false,                                                  // …nobody's claimed it
+    "tag": { "key": "practice", "label": "Practice", "color": "#22C55E" },
+    "driver": { "id": "…", "name": "Alex" },
+    "needsDriver": false,          // has a location, not all-day, and no driver yet
+    "place": { "id": "…", "name": "Eastside Park" },
+    "source": { "id": "…", "name": "Team feed", "type": "ics_feed" },
+    "circle": null,                // or { id, name } for circle events
+    "editable": true               // false for circle events: edit those in the circle
+  }]
+}
+```
+
+- **Filters:** `participantId`, `tagId`, `assigned=all|assigned|unassigned`,
+  `includeCircles=true|false`. Events *overlapping* the range are included (a sleepover
+  that started yesterday), and so are zero-length deadlines at the range start. Foreign
+  participant/tag ids are rejected.
+- **Circle events on your home calendar:**
+  - Events assigned to your household (or where your household is driving) appear on
+    your home calendar, in your household's circle color.
+  - Unclaimed circle events show only to people who are members of that circle, so they
+    can claim them.
+  - Other households' circle events never appear.
+  - Circle events are read-only from the home view.
+- **Detail:** `GET /workspaces/:id/events/:eventId`.
+- **Claiming:** `PATCH /workspaces/:id/events/:eventId`
+  `{ participantId?, eventTagId?, driverParticipantId? }` (member+). This is the
+  "nullable until claimed" step. It rejects ids from other workspaces and drivers who
+  aren't marked `canDrive`. Syncs never overwrite these fields.
 
 ## Home hub: lists, goals, reminders
 

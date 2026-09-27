@@ -10,6 +10,7 @@ import { workspaceRoutes } from "./routes/workspaces.js";
 import { inviteRoutes } from "./routes/invites.js";
 import { calendarSourceRoutes } from "./routes/calendar-sources.js";
 import { googleRoutes } from "./routes/google.js";
+import { eventRoutes } from "./routes/events.js";
 import { HttpGoogleApi, type GoogleApi } from "./integrations/google-api.js";
 import { Crypter } from "./lib/crypto.js";
 import { fetchFeed, type FeedFetcher } from "./ingestion/safe-fetch.js";
@@ -67,5 +68,6 @@ export async function buildApp(opts: {
   await app.register(inviteRoutes);
   await app.register(calendarSourceRoutes);
   await app.register(googleRoutes);
+  await app.register(eventRoutes);
   return app;
 }
