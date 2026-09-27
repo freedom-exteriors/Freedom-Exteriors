@@ -117,6 +117,7 @@ const workspaces: SeedWorkspace[] = [
     sourceName: "Seed sample events",
     defaultParticipant: "Maya",
     events: [
+      { title: "Piano lesson", tagKey: "activity", participant: "Maya", dayOffset: 0, startHourUtc: 22, durationMinutes: 45, location: "Ms. Kim's studio", driver: "Sam" },
       { title: "U12 Soccer Practice", tagKey: "practice", participant: "Maya", dayOffset: 1, startHourUtc: 22, durationMinutes: 90, location: "Eastside Park Field 3", place: "park", driver: "Alex" },
       { title: "U12 Soccer vs. Westview", tagKey: "game", participant: "Maya", dayOffset: 3, startHourUtc: 15, durationMinutes: 90, location: "Westview HS", place: "westview", driver: "Sam" },
       { title: "Swim Practice", tagKey: "practice", participant: null, dayOffset: 2, startHourUtc: 23, durationMinutes: 60, location: "YMCA", place: "ymca" },

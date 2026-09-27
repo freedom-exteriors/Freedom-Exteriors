@@ -94,6 +94,39 @@ try {
   await page.getByText("Connected calendars").waitFor();
   await shot(page, "08-settings-calendars");
   step("settings: calendars");
+  for (const [tab, marker] of [["People & places", "Places"], ["Members", "Invite someone"], ["Notifications", "On this device"]] as const) {
+    await page.getByRole("link", { name: tab }).click();
+    await page.getByText(marker, { exact: true }).waitFor();
+  }
+  step("every settings tab opens");
+
+  // Wall screen: made in Settings, opened on a "tablet" with no login.
+  await page.getByRole("link", { name: "Wall screen" }).click();
+  await page.getByLabel("Screen name").fill("Kitchen tablet");
+  await page.getByRole("button", { name: "Create link" }).click();
+  const wallUrl = await page.getByLabel("Wall link").inputValue();
+  assert.ok(!wallUrl.includes(page.url().split("/w/")[1]!.split("/")[0]!), "wall link isn't the workspace id");
+  const tv = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
+  const wall = await tv.newPage();
+  wall.on("pageerror", (e) => { throw e; });
+  await wall.goto(wallUrl.replace(/^https?:\/\/[^/]+/, BASE));
+  await wall.locator(".wall-clock").waitFor();
+  assert.equal(await wall.locator(".topbar").count(), 0, "no app chrome on the wall");
+  assert.ok(await wall.getByText("Piano lesson").isVisible());
+  assert.equal(await wall.locator('meta[name="referrer"]').getAttribute("content"), "no-referrer");
+  await shot(wall, "11-wall");
+  await wall.setViewportSize({ width: 1080, height: 1920 });
+  await shot(wall, "12-wall-portrait");
+  step("wall screen: no login, big type, today + next days, chores, groceries");
+
+  await page.reload();
+  page.once("dialog", (d) => d.accept());
+  await page.getByRole("button", { name: "Turn off" }).first().click();
+  await page.waitForTimeout(500);
+  await wall.reload();
+  await wall.getByText("This screen was turned off.").waitFor();
+  step("turning a screen off locks it out immediately");
+  await tv.close();
   await ctx.close();
 
   // ─── Kid (viewer) on a phone ───

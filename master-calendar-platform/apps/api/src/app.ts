@@ -20,6 +20,7 @@ import { geocodeAddress } from "@mcp/planner";
 import multipart from "@fastify/multipart";
 import { photoRoutes } from "./routes/photos.js";
 import { notificationRoutes } from "./routes/notifications.js";
+import { redactWallToken, wallRoutes } from "./routes/wall.js";
 import { LocalDiskPhotoStore, SupabasePhotoStore, type PhotoStore } from "./extraction/photo-store.js";
 import { ClaudeScheduleExtractor, type ScheduleExtractor } from "./extraction/extractor.js";
 import { HttpGoogleApi, type GoogleApi } from "./integrations/google-api.js";
@@ -52,7 +53,10 @@ export async function buildApp(opts: {
   extractor?: ScheduleExtractor | null;
 }): Promise<FastifyInstance> {
   const app = Fastify({
-    logger: opts.logger ?? false,
+    // Wall-display links are bearer secrets in the URL: never write them to logs.
+    logger: opts.logger
+      ? { serializers: { req: (req) => ({ method: req.method, url: redactWallToken(req.url), remoteAddress: req.ip }) } }
+      : false,
     trustProxy: true, // Railway / Vercel proxy: rate limits key on the real client IP
     bodyLimit: 1_000_000,
   });
@@ -104,6 +108,7 @@ export async function buildApp(opts: {
   await app.register(planRoutes);
   await app.register(photoRoutes);
   await app.register(notificationRoutes);
+  await app.register(wallRoutes);
   return app;
 }
 

@@ -28,7 +28,7 @@ React web app · Supabase Storage for photos · Vercel (web) + Railway (API + cr
 | 8b | ~~Schedule organizer API~~ | folded into step 6 |
 | 9 | Retailer handoff (see below) | *new* |
 | 10 | Dashboard frontend (+ web push for leave-by alerts) | ✅ done |
-| 11 | Wall/kiosk route (+ today's chores and the grocery list) | next |
+| 11 | Wall/kiosk route (+ today's chores and the grocery list) | ✅ done |
 
 ## Local setup
 
@@ -519,8 +519,8 @@ chores), ticking their own chores, and uploading a photo for a parent to review.
 - Works in Chrome, Edge and Firefox, and on iPhone/iPad (iOS 16.4+) once the app is
   added to the Home Screen (`manifest.webmanifest` makes it installable).
 
-**Tested in a real browser:** `npm run e2e` drives Chromium (Playwright) against the live
-API, Vite and seeded data. As a parent on a laptop and as a kid on a phone it checks:
+**Tested in a real browser:** `npm run e2e` (15 checks) drives Chromium (Playwright)
+against the live API, Vite and freshly seeded data. As a parent on a laptop and as a kid on a phone it checks:
 - colors, the unassigned and driver flags, and household-zone times (the browser runs in
   a *different* zone on purpose);
 - claiming an event, adding groceries, the automation tasks, and planning and accepting;
@@ -529,6 +529,47 @@ API, Vite and seeded data. As a parent on a laptop and as a kid on a phone it ch
 Screenshots land in `docs/screenshots/`.
 
 ![Week view](docs/screenshots/01-calendar-week.png)
+
+## Wall display — step 11
+
+An old tablet or a TV browser in the kitchen: **Settings → Wall screen → Create link**,
+open the link on the screen, bookmark it. No login, no app chrome, dark theme (less
+glare), big type.
+
+![Wall display](docs/screenshots/11-wall.png)
+
+- **What it shows:**
+  - Today (large), then the next 1–6 days, each event in its person's color, with place
+    and 🚗 driver.
+  - **Leave-by banners** from the alert job ("🚗 Alex: leave by 4:50 for Soccer practice ·
+    heavy traffic"), which pulse in the last 10 minutes.
+  - Open chores with whose they are, the grocery list, and the color legend.
+- **Keeps running:**
+  - Refreshes every 60 s.
+  - If the Wi-Fi drops it keeps the last good data and says "Offline — showing 11:45".
+  - Asks the browser to keep the screen awake (Wake Lock), and reloads itself at 3 AM
+    to pick up new versions.
+  - Works landscape and portrait.
+- **Deviation from the brief (security):**
+  - The brief used `/wall/:workspaceId` as the secret. But the workspace id isn't secret
+    any more: it's in every app URL, and **other households in a shared circle receive
+    it** (circle participants link to their homes), so any of them could have opened
+    your kitchen screen.
+  - Instead, each screen gets its **own random link** (`WallDisplay`, only the SHA-256
+    stored, shown once).
+  - Owners can have several ("Kitchen", "Hallway") and **turn one off** without touching
+    the others. A turned-off screen shows "This screen was turned off" on its next
+    refresh.
+- **Minimal data:** the wall endpoint returns titles, times, people and colors, optional
+  places, chores and groceries. It never returns descriptions, notes, links or emails
+  (a test checks this).
+- **Hardening:**
+  - Wall tokens are **redacted from server logs**.
+  - The page sends `Referrer-Policy: no-referrer` and `noindex`.
+  - The endpoint is `no-store` and rate-limited.
+  - The owners' list shows each screen's "last seen".
+- **Still a v1, as the brief says:** anyone holding a wall link can see what's on it.
+  Real device sign-in (pairing code + revocable device session) is the fast-follow.
 
 ## Deploying (when you're ready)
 

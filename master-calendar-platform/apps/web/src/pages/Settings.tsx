@@ -5,18 +5,19 @@ import { useAction, useLoad } from "../lib/hooks";
 import { useWorkspace } from "../components/WorkspaceLayout";
 import { fmt } from "../lib/dates";
 
-const TABS = [["calendars", "Calendars"], ["people", "People & places"], ["members", "Members"], ["notifications", "Notifications"]] as const;
+const TABS = [["calendars", "Calendars"], ["people", "People & places"], ["members", "Members"], ["wall", "Wall screen"], ["notifications", "Notifications"]] as const;
 
 export function SettingsPage() {
   const { tab = "calendars" } = useParams();
   return (
     <section>
       <nav className="subtabs">
-        {TABS.map(([k, label]) => <NavLink key={k} to={`../settings/${k}`} relative="path" className={({ isActive }) => (isActive ? "on" : "")}>{label}</NavLink>)}
+        {TABS.map(([k, label]) => <NavLink key={k} to={`../${k}`} relative="path" className={({ isActive }) => (isActive ? "on" : "")}>{label}</NavLink>)}
       </nav>
       {tab === "calendars" && <Calendars />}
       {tab === "people" && <People />}
       {tab === "members" && <Members />}
+      {tab === "wall" && <WallScreens />}
       {tab === "notifications" && <Notifications />}
     </section>
   );
@@ -321,6 +322,65 @@ function Notifications() {
         {me.data && <p className="muted small">{me.data.pushDevices} device{me.data.pushDevices === 1 ? "" : "s"} set up.</p>}
       </div>
       <label className="row card"><input type="checkbox" checked={!!me.data?.emailNotifications} onChange={toggleEmail} /> Also email me alerts ({me.data?.email})</label>
+      {act.error && <p className="error">{act.error}</p>}
+    </div>
+  );
+}
+
+interface WallDisplay { id: string; name: string; daysAhead: number; showLocations: boolean; lastSeenAt: string | null }
+
+function WallScreens() {
+  const { ws, base, can } = useWorkspace();
+  const screens = useLoad(() => (can.manage ? api.get<WallDisplay[]>(`${base}/wall-displays`) : Promise.resolve([])), [base]);
+  const [form, setForm] = useState({ name: "Kitchen", daysAhead: 4, showLocations: true });
+  const [link, setLink] = useState<string | null>(null);
+  const act = useAction();
+  if (!can.manage) return <p className="muted">An owner can set up a wall screen for {ws.name}.</p>;
+  const create = async (e: FormEvent) => {
+    e.preventDefault();
+    await act.run(async () => setLink((await api.post<{ url: string }>(`${base}/wall-displays`, form)).url));
+    void screens.reload();
+  };
+  const turnOff = async (d: WallDisplay) => {
+    if (!confirm(`Turn off “${d.name}”? That screen will stop showing the calendar.`)) return;
+    await act.run(() => api.del(`${base}/wall-displays/${d.id}`));
+    void screens.reload();
+  };
+  return (
+    <div className="stack">
+      <h2>Wall screens</h2>
+      <p className="muted">An old tablet or a TV browser in the kitchen: today and the next few days, today's leave-by times, chores and the grocery list. Big type, refreshes itself.</p>
+      <div className="card note small">
+        Anyone with a wall link can see what's on it — treat it like a house key. It shows no notes, links or emails. Each screen has its own link, so you can turn one off without touching the others.
+      </div>
+      <ul className="items">
+        {screens.data?.map((d) => (
+          <li key={d.id} className="item">
+            <div className="grow"><b>{d.name}</b> <span className="muted small">{d.daysAhead} days{d.showLocations ? "" : " · no locations"} · {d.lastSeenAt ? `last seen ${fmt(d.lastSeenAt, ws.timeZone, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}` : "not opened yet"}</span></div>
+            <button className="ghost" onClick={() => turnOff(d)}>Turn off</button>
+          </li>
+        ))}
+      </ul>
+      <form className="card stack" onSubmit={create}>
+        <b>Add a screen</b>
+        <div className="row wrap">
+          <input aria-label="Screen name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          <select aria-label="Days" value={form.daysAhead} onChange={(e) => setForm({ ...form, daysAhead: Number(e.target.value) })}>
+            {[1, 2, 3, 4, 5, 7].map((n) => <option key={n} value={n}>{n === 1 ? "Today only" : `Today + ${n - 1} days`}</option>)}
+          </select>
+          <label className="row small"><input type="checkbox" checked={form.showLocations} onChange={(e) => setForm({ ...form, showLocations: e.target.checked })} /> show places</label>
+          <button className="primary" disabled={act.busy}>Create link</button>
+        </div>
+        {link && (
+          <div className="stack">
+            <div className="row">
+              <input readOnly value={link} aria-label="Wall link" onFocus={(e) => e.target.select()} />
+              <button type="button" onClick={() => navigator.clipboard?.writeText(link)}>Copy</button>
+            </div>
+            <p className="muted small">Open this on the screen and bookmark it or add it to the home screen. It's shown only once — make another link for another screen.</p>
+          </div>
+        )}
+      </form>
       {act.error && <p className="error">{act.error}</p>}
     </div>
   );

@@ -11,6 +11,7 @@ import { PlanPage } from "./pages/Plan";
 import { GoalsPage } from "./pages/Goals";
 import { PhotosPage, PhotoReview } from "./pages/Photos";
 import { SettingsPage } from "./pages/Settings";
+import { Wall } from "./pages/Wall";
 
 function RequireAuth({ children }: { children: React.ReactElement }) {
   const { me, loading } = useAuth();
@@ -26,6 +27,7 @@ export function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/signup" element={<Signup />} />
       <Route path="/invite/:token" element={<AcceptInvite />} />
+      <Route path="/wall/:token" element={<Wall />} />
       <Route path="/" element={<RequireAuth><Home /></RequireAuth>} />
       <Route path="/w/:workspaceId" element={<RequireAuth><WorkspaceLayout /></RequireAuth>}>
         <Route index element={<Navigate to="calendar" replace />} />

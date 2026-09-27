@@ -55,6 +55,7 @@ model Workspace {
   oauthConnections    OAuthConnection[]
   oauthStates         OAuthState[]
   notifications       Notification[]
+  wallDisplays        WallDisplay[]
   // In circles: the Participant rows that represent this home.
   representedIn       Participant[]           @relation("LinkedWorkspace")
   createdAt           DateTime                @default(now()) @db.Timestamptz(3)
@@ -732,4 +733,23 @@ model PushSubscription {
   lastUsedAt DateTime? @db.Timestamptz(3)
 
   @@index([userId])
+}
+
+// A kitchen/hallway screen showing the household's next few days. Access is the secret
+// link itself (v1, per the brief) — but a per-screen random token, never the workspace
+// id (which circle members and every app URL can see). Only the SHA-256 is stored; each
+// screen can be switched off on its own. Real device sign-in is a fast-follow.
+model WallDisplay {
+  id            String    @id @default(uuid()) @db.Uuid
+  workspaceId   String    @db.Uuid
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name          String // "Kitchen tablet"
+  tokenHash     String    @unique
+  daysAhead     Int       @default(4) // today + 3
+  showLocations Boolean   @default(true)
+  lastSeenAt    DateTime? @db.Timestamptz(3)
+  revokedAt     DateTime? @db.Timestamptz(3)
+  createdAt     DateTime  @default(now()) @db.Timestamptz(3)
+
+  @@index([workspaceId])
 }

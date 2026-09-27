@@ -193,3 +193,55 @@ details summary { cursor: pointer; color: var(--muted); margin-bottom: .5rem; }
   .ws-switch { max-width: 48vw; min-width: 0; flex: 0 1 auto; }
   .range-title { font-size: 1rem; }
 }
+
+/* ─── wall display ─── */
+body.wall-body { background: #0e1422; }
+.wall { --wall-bg: #0e1422; --wall-card: #172035; --wall-ink: #eef1f7; --wall-muted: #93a0b8;
+  min-height: 100vh; background: var(--wall-bg); color: var(--wall-ink); padding: 2.2vh 2.2vw; display: flex; flex-direction: column; gap: 1.8vh;
+  font-size: clamp(14px, 1.35vw, 30px); cursor: none; }
+.wall-msg { display: grid; place-items: center; text-align: center; font-size: clamp(20px, 3vw, 48px); cursor: default; }
+.wall-msg small { color: var(--wall-muted); font-size: .5em; }
+.wall-head { display: flex; justify-content: space-between; align-items: flex-end; }
+.wall-household { color: var(--wall-muted); font-size: 1em; letter-spacing: .04em; text-transform: uppercase; }
+.wall-date { font-size: 2.1em; font-weight: 700; }
+.wall-clock { font-size: 3.6em; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
+.wall-leave { display: flex; flex-direction: column; gap: .6vh; }
+.wall-leave > div { background: #2a3350; border-left: 6px solid #f5b942; border-radius: 12px; padding: .7em 1em; font-size: 1.15em; }
+.wall-leave > div.urgent { background: #5a2a14; border-left-color: #fb923c; animation: wall-pulse 2s ease-in-out infinite; }
+.wall-leave span { color: var(--wall-muted); }
+@keyframes wall-pulse { 50% { background: #7a3818; } }
+.wall-grid { flex: 1; display: grid; grid-template-columns: 1.15fr 2.1fr .95fr; gap: 1.4vw; min-height: 0; }
+.wall h2, .wall h3 { color: var(--wall-muted); text-transform: uppercase; letter-spacing: .06em; font-size: .85em; margin: 0 0 .8vh; }
+.wall-today, .wall-day, .wall-side > div { background: var(--wall-card); border-radius: 18px; padding: 1.2vh 1.1vw; }
+.wall-today { display: flex; flex-direction: column; gap: 1vh; overflow: hidden; }
+.wall-next { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 1vw; min-height: 0; }
+.wall-day { display: flex; flex-direction: column; gap: .8vh; overflow: hidden; min-width: 0; }
+.wall-day .wall-event { flex-direction: column; gap: .1em; font-size: .92em; }
+.wall-day .wall-time { min-width: 0; font-size: .9em; }
+.wall-title, .wall-sub { overflow-wrap: anywhere; }
+.wall-event { --c: #9aa1ad; display: flex; gap: .8em; align-items: baseline; border-left: 6px solid var(--c); padding: .45em .7em; border-radius: 10px; background: color-mix(in srgb, var(--c) 16%, var(--wall-card)); }
+.wall-event.big { font-size: 1.3em; }
+.wall-event.past { opacity: .4; }
+.wall-event.now { box-shadow: 0 0 0 2px var(--c); }
+.wall-time { font-weight: 700; min-width: 4.6em; font-variant-numeric: tabular-nums; }
+.wall-title { font-weight: 600; }
+.wall-sub { color: var(--wall-muted); font-size: .8em; }
+.wall-empty { color: var(--wall-muted); }
+.wall-side { display: flex; flex-direction: column; gap: 1.6vh; min-height: 0; }
+.wall-side ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .6vh; }
+.wall-side li { display: flex; align-items: baseline; gap: .5em; }
+.wall-side li i { align-self: center; }
+.wall-side li span { color: var(--wall-muted); font-size: .85em; white-space: nowrap; }
+.wall-side i, .wall-people i { width: .8em; height: .8em; border-radius: 50%; display: inline-block; flex: none; }
+.wall-groceries { margin: 0; line-height: 1.5; }
+.wall-people { display: flex; flex-wrap: wrap; gap: .4em 1em; background: transparent !important; padding: 0 !important; color: var(--wall-muted); font-size: .85em; }
+.wall-people span { display: inline-flex; align-items: center; gap: .35em; }
+.wall-foot { text-align: right; color: var(--wall-muted); font-size: .75em; }
+.wall-foot.stale { color: #fb923c; }
+@media (orientation: portrait), (max-width: 900px) {
+  .wall { font-size: clamp(15px, 2.6vw, 30px); }
+  .wall-grid { grid-template-columns: 1fr; }
+  .wall-next { grid-auto-flow: row; }
+  .wall-day .wall-event { flex-direction: row; gap: .8em; font-size: 1em; }
+  .wall-day .wall-time { min-width: 4.6em; }
+}
