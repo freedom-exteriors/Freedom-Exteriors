@@ -64,6 +64,8 @@ model User {
   id                  String                  @id @default(uuid()) @db.Uuid
   email               String                  @unique // stored lowercased by the app
   passwordHash        String // argon2id
+  // Opt-in: time-sensitive alerts also go by email (needs RESEND_API_KEY on the server).
+  emailNotifications  Boolean                 @default(false)
   memberships         WorkspaceMembership[]
   sessions            Session[]
   notifications       Notification[]
@@ -605,22 +607,26 @@ enum DepartureAlertStatus {
 // One per (event, driver). The departure job re-checks traffic as the event approaches
 // and moves leaveBy; `notifiedAt` makes the warning fire once.
 model DepartureAlert {
-  id              String               @id @default(uuid()) @db.Uuid
-  eventId         String               @db.Uuid
-  event           Event                @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  participantId   String               @db.Uuid // the driver
-  participant     Participant          @relation(fields: [participantId], references: [id], onDelete: Cascade)
-  originLabel     String // "Home", or the previous event's place
-  originLatitude  Float
-  originLongitude Float
-  leaveBy         DateTime             @db.Timestamptz(3)
-  trafficMinutes  Int
-  typicalMinutes  Int // no-traffic baseline, for "8 min longer than usual"
-  nextCheckAt     DateTime?            @db.Timestamptz(3)
-  lastCheckedAt   DateTime             @db.Timestamptz(3)
-  notifiedAt      DateTime?            @db.Timestamptz(3)
-  status          DepartureAlertStatus @default(scheduled)
-  createdAt       DateTime             @default(now()) @db.Timestamptz(3)
+  id                 String               @id @default(uuid()) @db.Uuid
+  eventId            String               @db.Uuid
+  event              Event                @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  participantId      String               @db.Uuid // the driver
+  participant        Participant          @relation(fields: [participantId], references: [id], onDelete: Cascade)
+  originLabel        String // "Home", or the previous event's place
+  originLatitude     Float
+  originLongitude    Float
+  leaveBy            DateTime             @db.Timestamptz(3)
+  trafficMinutes     Int
+  typicalMinutes     Int // no-traffic baseline, for "8 min longer than usual"
+  nextCheckAt        DateTime?            @db.Timestamptz(3)
+  lastCheckedAt      DateTime             @db.Timestamptz(3)
+  // What this leave-by was computed for; if the event's time or place changes, recompute
+  // (compared by value, not by clock, so worker/DB clock skew can't hide a change).
+  computedForStart   DateTime             @default(now()) @db.Timestamptz(3)
+  computedForPlaceId String?              @db.Uuid
+  notifiedAt         DateTime?            @db.Timestamptz(3)
+  status             DepartureAlertStatus @default(scheduled)
+  createdAt          DateTime             @default(now()) @db.Timestamptz(3)
 
   @@unique([eventId, participantId])
   @@index([status, nextCheckAt])
@@ -629,6 +635,7 @@ model DepartureAlert {
 // ───────────────────────── Notifications ─────────────────────────
 
 enum NotificationChannel {
+  in_app // the dashboard's bell; always delivered
   web_push
   sms
   email
@@ -648,6 +655,8 @@ model Notification {
   url         String? // deep link into the app
   sendAt      DateTime            @db.Timestamptz(3)
   sentAt      DateTime?           @db.Timestamptz(3)
+  readAt      DateTime?           @db.Timestamptz(3)
+  kind        String              @default("general") // "leave_by", "leave_earlier", …
   error       String?
   dedupeKey   String
   createdAt   DateTime            @default(now()) @db.Timestamptz(3)

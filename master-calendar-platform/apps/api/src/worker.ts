@@ -1,8 +1,14 @@
-// Background worker (a separate Railway service): runs due feed syncs every minute.
-// Steps 7–8 add the automation rules, reminder generator and leave-by alerts here.
+// Background worker (a separate Railway service from the API). One loop, several jobs:
+//   feeds         every minute   ICS + Google calendar sync (each source ≤ every 30 min)
+//   photos        every minute   retry photo extractions that never finished
+//   departures    every minute   leave-by alerts with traffic
+//   notifications every minute   email delivery (in-app is instant)
+//   automation    every 5 min    rule engine → tasks
+//   reminders     hourly         seasonal reminders → tasks
 import path from "node:path";
 import { config as loadEnv } from "dotenv";
 import { createPrismaClient } from "@mcp/db";
+import { GoogleRoutesTrafficProvider } from "@mcp/planner";
 import { loadConfig } from "./config.js";
 import { Crypter } from "./lib/crypto.js";
 import { fetchFeed } from "./ingestion/safe-fetch.js";
@@ -11,30 +17,40 @@ import { HttpGoogleApi } from "./integrations/google-api.js";
 import { runPendingExtractions } from "./extraction/process.js";
 import { ClaudeScheduleExtractor } from "./extraction/extractor.js";
 import { photoStoreFor } from "./app.js";
+import { runAutomation } from "./jobs/automation.js";
+import { runReminders } from "./jobs/reminders.js";
+import { estimateOnlyTraffic, runDepartures } from "./jobs/departures.js";
+import { ResendEmailSender, deliverPending } from "./jobs/notify.js";
+import { JobScheduler } from "./jobs/scheduler.js";
 
 loadEnv({ path: path.resolve(import.meta.dirname, "../../../.env") });
 const config = loadConfig();
 const prisma = createPrismaClient(config.databaseUrl);
+const log = (msg: string, extra: object = {}) => console.log(JSON.stringify({ t: new Date().toISOString(), msg, ...extra }));
+
 const crypter = config.credentialsKey ? new Crypter(config.credentialsKey) : null;
 const google = config.google ? new HttpGoogleApi(config.google) : null;
 const extraction = {
   store: photoStoreFor(config),
   extractor: config.extractionModel ? new ClaudeScheduleExtractor(config.extractionModel) : null,
-  log: (msg: string, extra: object = {}) => log(msg, extra),
+  log,
 };
-const log = (msg: string, extra: object = {}) => console.log(JSON.stringify({ t: new Date().toISOString(), msg, ...extra }));
+const traffic = config.mapsApiKey ? new GoogleRoutesTrafficProvider(config.mapsApiKey) : estimateOnlyTraffic;
+const email = config.email ? new ResendEmailSender(config.email.resendApiKey, config.email.from) : null;
+
+const scheduler = new JobScheduler(
+  [
+    { name: "feeds", everySeconds: 60, run: () => runDueSyncs(prisma, { fetchFeed, crypter, google, log }) },
+    { name: "photos", everySeconds: 60, run: async () => ({ retried: await runPendingExtractions(prisma, extraction) }) },
+    { name: "departures", everySeconds: 60, run: () => runDepartures(prisma, { traffic, live: !!config.mapsApiKey }) },
+    { name: "notifications", everySeconds: 60, run: () => deliverPending(prisma, { email }) },
+    { name: "automation", everySeconds: 300, run: () => runAutomation(prisma) },
+    { name: "reminders", everySeconds: 3600, run: () => runReminders(prisma) },
+  ],
+  log,
+);
 
 let stopping = false;
-async function tick() {
-  try {
-    const r = await runDueSyncs(prisma, { fetchFeed, crypter, google, log });
-    if (r.attempted) log("tick", r);
-    await runPendingExtractions(prisma, extraction);
-  } catch (err) {
-    log("tick failed", { error: String(err) });
-  }
-}
-
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, async () => {
     stopping = true;
@@ -43,9 +59,8 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   });
 }
 
-log("worker started");
+log("worker started", { liveTraffic: !!config.mapsApiKey, email: !!email, photos: !!extraction.extractor, google: !!google });
 while (!stopping) {
-  await tick();
-  await new Promise((r) => setTimeout(r, 60_000));
+  await scheduler.tick();
+  await new Promise((r) => setTimeout(r, 15_000));
 }
-

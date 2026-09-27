@@ -19,6 +19,7 @@ import { planRoutes } from "./routes/plan.js";
 import { geocodeAddress } from "@mcp/planner";
 import multipart from "@fastify/multipart";
 import { photoRoutes } from "./routes/photos.js";
+import { notificationRoutes } from "./routes/notifications.js";
 import { LocalDiskPhotoStore, SupabasePhotoStore, type PhotoStore } from "./extraction/photo-store.js";
 import { ClaudeScheduleExtractor, type ScheduleExtractor } from "./extraction/extractor.js";
 import { HttpGoogleApi, type GoogleApi } from "./integrations/google-api.js";
@@ -102,6 +103,7 @@ export async function buildApp(opts: {
   await app.register(peopleRoutes);
   await app.register(planRoutes);
   await app.register(photoRoutes);
+  await app.register(notificationRoutes);
   return app;
 }
 

@@ -17,6 +17,8 @@ const schema = z.object({
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
   SUPABASE_STORAGE_BUCKET: z.string().default("schedule-photos"),
   PHOTO_DIR: z.string().optional(),
+  RESEND_API_KEY: z.string().optional(),
+  NOTIFY_FROM_EMAIL: z.string().default("Home Base <alerts@example.com>"),
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
   GOOGLE_REDIRECT_URI: z.string().optional(),
@@ -41,6 +43,8 @@ export interface AppConfig {
   /** Private Supabase Storage bucket for photos; null → local folder (`photoDir`). */
   supabaseStorage: { url: string; serviceRoleKey: string; bucket: string } | null;
   photoDir: string;
+  /** Email delivery for notifications; null → in-app only. */
+  email: { resendApiKey: string; from: string } | null;
   /** Google OAuth client; null disables "Connect Google Calendar". */
   google: { clientId: string; clientSecret: string; redirectUri: string } | null;
 }
@@ -63,6 +67,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       c.SUPABASE_URL && c.SUPABASE_SERVICE_ROLE_KEY
         ? { url: c.SUPABASE_URL, serviceRoleKey: c.SUPABASE_SERVICE_ROLE_KEY, bucket: c.SUPABASE_STORAGE_BUCKET }
         : null,
+    email: c.RESEND_API_KEY ? { resendApiKey: c.RESEND_API_KEY, from: c.NOTIFY_FROM_EMAIL } : null,
     photoDir: c.PHOTO_DIR || new URL("../.data/photos", import.meta.url).pathname,
     google:
       c.GOOGLE_CLIENT_ID && c.GOOGLE_CLIENT_SECRET && c.GOOGLE_REDIRECT_URI

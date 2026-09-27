@@ -24,10 +24,10 @@ React web app · Supabase Storage for photos · Vercel (web) + Railway (API + cr
 | 5 | Unified event query endpoint (incl. circle events assigned to your household) | ✅ done |
 | 6 | Lists & goals API + people/places + schedule-organizer API | ✅ done |
 | 7 | Photo extraction → review → confirm | ✅ done |
-| 8 | Scheduled jobs: automation rule engine, seasonal reminders, **leave-by traffic alerts**, notification sender | *expanded* · next |
+| 8 | Scheduled jobs: automation rule engine, seasonal reminders, **leave-by traffic alerts**, notification sender | ✅ done |
 | 8b | ~~Schedule organizer API~~ | folded into step 6 |
 | 9 | Retailer handoff (see below) | *new* |
-| 10 | Dashboard frontend | |
+| 10 | Dashboard frontend (+ web push for leave-by alerts) | next |
 | 11 | Wall/kiosk route (+ today's chores and the grocery list) | |
 
 ## Local setup
@@ -40,7 +40,7 @@ npm run db:deploy                                   # apply migrations
 npm run db:seed                                     # one workspace per vertical
 npm test                                            # db, planner and API tests
 npm run dev -w @mcp/api                             # API on :3001
-npm run worker -w @mcp/api                          # background jobs (feed sync every minute)
+npm run worker -w @mcp/api                          # background jobs (see "Background jobs")
 ```
 
 `npm run db:migrate` creates a new migration after you edit `schema.prisma`.
@@ -420,6 +420,68 @@ candidates become events**. Nothing is ever added automatically.
 
 **Try it on a real image** (one model call, no database):
 `ANTHROPIC_API_KEY=… npm run try:photo -w @mcp/api -- ./flyer.jpg`
+
+## Background jobs — step 8
+
+`npm run worker -w @mcp/api` runs one loop with a job scheduler. Each job has its own
+cadence; one failing never stops the others. Every job is **idempotent** (unique keys +
+`skipDuplicates`), so a restart, a retry or a second worker never duplicates anything.
+
+| Job | Every | What it does |
+|---|---|---|
+| `feeds` | 1 min | ICS + Google sync (each source ≤ every 30 min) |
+| `photos` | 1 min | retries photo extractions that never finished |
+| `departures` | 1 min | leave-by alerts (below) |
+| `notifications` | 1 min | sends opted-in emails |
+| `automation` | 5 min | rule engine → tasks |
+| `reminders` | hourly | seasonal reminders → tasks |
+
+**Automation rules** (`jobs/automation.ts`), from each workspace's template:
+- `create_reminder`: a task due `timingOffsetMinutes` before the event, e.g. "Pack
+  uniform & gear for {{title}}" (placeholders: `{{title}} {{date}} {{time}} {{person}}
+  {{location}}`, rendered in the household's time zone). It's assigned to the event's
+  driver when known.
+- `flag_unassigned_task` (the brief's unassigned-event trigger path): a high-priority task
+  only while the event **needs a person**, meaning nobody's claimed it, or it has a
+  location and nobody's driving. It **completes itself** once someone steps in, so stale
+  nags don't pile up.
+- Tasks appear up to 7 days before they're due. (rule, event) is unique. When an event
+  moves, its open tasks' due dates move too. A deleted event takes its tasks with it.
+
+**Seasonal reminders** (`jobs/reminders.ts`):
+- The next occurrence becomes a task `leadDays` ahead, on the reminder's list and for its
+  person, due midday on the date in the household's time zone.
+- (reminder, occurrenceDate) is unique.
+- If last time's task is still open, no second one is stacked on it.
+
+**Leave-by alerts** (`jobs/departures.ts`):
+- **Which events:** timed events in the next 3 h with a place and a **driver** who can
+  drive and has a home place.
+- **Origin:** the previous stop if it just ended, else home. Drive time comes from Google
+  Routes at the real departure time.
+- **Re-checks:** at ~2 h / 45 min / 15 min before leave-by, and immediately if the event's
+  time or place changes. This is compared by value, not by timestamps, so clock skew
+  can't hide a change.
+- **Heads-up:** if traffic pulls leave-by 10+ min earlier, the driver hears right away
+  ("Traffic: leave 15 min earlier for Soccer practice").
+- **Warning:** exactly one, 10 min before leave-by: "Leave by 3:45 PM — Soccer practice ·
+  35 min drive from Home; 20 min longer than usual — heavy traffic." A moved event gets
+  a fresh warning for its new time.
+- **Who hears it:** the driver's own login; if they don't have one (grandma drives), the
+  household's adults.
+- **Without `GOOGLE_MAPS_API_KEY`:** it uses a straight-line drive estimate and says so
+  ("estimate — no live traffic"), never "traffic is light".
+- **Cost:** about 8 Routes calls per driven event (2 per check × initial + 3 re-checks).
+
+**Notifications** (`jobs/notify.ts`, `routes/notifications.ts`):
+- An outbox table. `(user, dedupeKey, channel)` is unique, so nothing is ever sent twice.
+- **In-app** always: `GET /me/notifications` (+ `unreadCount`) and
+  `POST /me/notifications/read { ids | all }`.
+- **Email** for people who opt in (`PATCH /me { emailNotifications: true }`) via Resend
+  (`RESEND_API_KEY`). Alerts older than 30 minutes are dropped, not sent late: a "leave
+  now" email an hour late is worse than none.
+- **Web push** (a phone buzz for leave-by) needs the web app's service worker, so it
+  ships with the dashboard.
 
 ## Home hub: lists, goals, reminders
 
