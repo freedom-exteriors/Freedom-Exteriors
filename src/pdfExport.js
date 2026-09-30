@@ -2,6 +2,8 @@
 // Opens a clean white print view in a new tab. On iPad/iPhone, Safari shows "Save to Files" → PDF.
 // On desktop, browser print dialog → Save as PDF.
 
+import { TRADES } from "./purchaseAgreementSchema";
+
 const COMPANY = {
   name: "Freedom Exteriors LLC",
   address: "1145 Summit Ave, Mahtomedi, MN 55115",
@@ -330,6 +332,69 @@ export function exportDocsAcknowledgement(data, job) {
       <div class="sig-block">${sigHtml(data.repSignature, "Freedom Exteriors LLC Representative")}</div>
     </div></div>`;
   openPrint("Contractor Documents Acknowledgement", html);
+}
+
+export function exportPurchaseAgreement(data, job) {
+  const trade = TRADES[data.trade] || TRADES.roofing;
+  const money = v => (v === "" || v === null || v === undefined || isNaN(v)) ? "" : "$" + Number(v).toLocaleString();
+
+  const rowHtml = (row) => {
+    const v = (data.rows || {})[row.key];
+    if (row.type === "text") {
+      if (!v) return "";
+      return `<div class="checklist-item"><span class="item-title" style="min-width:220px">${row.label}:</span><span>${v}</span></div>`;
+    }
+    if (row.type === "text2") {
+      if (!v?.a && !v?.b) return "";
+      return `<div class="checklist-item"><span class="item-title" style="min-width:220px">${row.label} / ${row.label2}:</span><span>${v?.a || ""}${v?.a && v?.b ? " / " : ""}${v?.b || ""}</span></div>`;
+    }
+    const selected = v?.selected || [];
+    const details = v?.details || "";
+    if (!selected.length && !details) return "";
+    return `<div class="checklist-item"><span class="check">✓</span><span><strong>${row.label}:</strong> ${selected.join(", ")}${selected.length && details ? " — " : ""}${details}</span></div>`;
+  };
+
+  const sectionsHtml = trade.sections.map(sec => {
+    const rows = sec.rows.map(rowHtml).filter(Boolean).join("");
+    if (!rows) return "";
+    return `<div class="section"><div class="section-title">${sec.title}</div><div class="section-body">${rows}</div></div>`;
+  }).join("");
+
+  const html = `
+    <div class="doc-title"><h1>Purchase Agreement — ${trade.subtitle}</h1><h2>No. ${data.contractNo || ""} · MN License #BC-810020 · WI Dwelling Contractor License #4811-DCFR</h2></div>
+    <div class="section"><div class="section-title">Contract Submitted To</div><div class="section-body">
+      <div class="grid2">${field("Customer Name(s)", data.ownerNames)}${field("Email", data.ownerEmail)}</div>
+      <div class="grid2">${field("Home Phone", data.ownerHomePhone)}${field("Cell Phone", data.ownerCellPhone)}</div>
+      <div class="grid2">${field("Street", data.ownerAddress)}${field("City, State & Zip", data.ownerCityStateZip)}</div>
+      ${field("Date", data.date)}
+    </div></div>
+    ${sectionsHtml}
+    ${data.additionalDetails ? `<div class="section"><div class="section-title">Additional Details</div><div class="section-body"><div style="white-space:pre-wrap">${data.additionalDetails}</div></div></div>` : ""}
+    <div class="section"><div class="section-title">Payment</div><div class="section-body">
+      <div class="grid3">${field("Payment Terms", data.paymentTermsPct ? data.paymentTermsPct + "% down" : "")}${field("Total Price", money(data.totalPrice))}${field("Down Payment", money(data.downPayment))}</div>
+      ${field("Down Payment Date", data.downPaymentDate)}
+      <p style="font-size:9.5pt;color:#555;line-height:1.6;margin-top:8px">Remaining balance due upon substantial completion. Please make checks payable to Freedom Exteriors LLC. All sales tax included in Total Price.</p>
+    </div></div>
+    <div class="section"><div class="section-title">Acceptance of Contract</div><div class="section-body">
+      <p style="font-size:9.5pt;color:#444;line-height:1.6">By signature below, the proposal prices, specifications and conditions above are hereby accepted. Contractor is authorized to perform the work specified. Payments will be made as outlined above. Terms on the additional pages of this Agreement also form a part of this Agreement and are hereby accepted. Verbal agreements will not be honored, no exceptions.</p>
+      <div class="notice-box" style="margin-top:10px"><strong>Right to Cancel.</strong> In the event of a home solicitation sale, you, the buyer, may cancel this purchase at any time prior to midnight of the third business day after the date of this purchase. See the attached Notice of Cancellation form for an explanation of this right. In all other circumstances, this Agreement is binding when signed by you and us.</div>
+      <div class="notice-box"><strong>Insurance Claim Denial.</strong> You may cancel this contract at any time within 72 hours after you have been notified that your insurer has denied your claim to pay for the goods and services to be provided under this contract. See the attached Notice of Cancellation per Minn. Stat. § 326B.811.</div>
+    </div></div>
+    <div class="section"><div class="section-title">Signatures</div><div class="section-body">
+      <div class="sig-block">${sigHtml(data.ownerSignature, "Owner Signature")}</div>
+      ${data.coOwnerSignature ? `<div class="sig-block">${sigHtml(data.coOwnerSignature, "Co-Owner Signature")}</div>` : ""}
+      <div class="sig-block">${sigHtml(data.contractorSignature, "Company Representative")}</div>
+    </div></div>
+    <div class="section"><div class="section-title">Notice of Cancellation — Per MN Statutes Section 326B.811</div><div class="section-body">
+      <p style="font-size:9pt;color:#666;margin-bottom:8px"><em>Give this entire section to the buyer. Keep a signed copy for company records.</em></p>
+      <div class="notice-box">If your insurer denies your claim to pay for goods and services to be provided under this contract, you may cancel the contract by mailing or delivering a signed and dated copy of this cancellation notice or any other written notice to:<br/><br/>
+      <strong>Freedom Exteriors LLC<br/>1145 Summit Ave<br/>Mahtomedi, MN 55115</strong><br/><br/>
+      at any time within 72 hours after you have been notified that your claim has been denied. If you cancel, any payments made by you under the contract will be returned within ten business days following receipt by the contractor of your cancellation notice.<br/><br/>
+      <strong>I hereby cancel this transaction.</strong></div>
+      <div class="sig-block"><div class="sig-line"></div><div class="sig-label">Date</div></div>
+      <div class="sig-block"><div class="sig-line"></div><div class="sig-label">Insured's Signature</div></div>
+    </div></div>`;
+  openPrint(`Purchase Agreement — ${trade.label}`, html);
 }
 
 export function exportCommissionWorkbook(data, job, isParLead) {

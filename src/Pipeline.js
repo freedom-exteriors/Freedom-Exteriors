@@ -5,6 +5,7 @@ import ContractFill from "./ContractFill";
 import CommissionWorkbook from "./CommissionWorkbook";
 import ContractorAgreement from "./ContractorAgreement";
 import RetailContract from "./RetailContract";
+import PurchaseAgreement from "./PurchaseAgreement";
 import PreBuildLetter from "./PreBuildLetter";
 import LienNotice from "./LienNotice";
 import CancellationNotice from "./CancellationNotice";
@@ -481,6 +482,7 @@ export default function Pipeline({ session }) {
   const [commissionOpen, setCommissionOpen] = useState(false);
   const [contractorAgreementOpen, setContractorAgreementOpen] = useState(false);
   const [retailContractOpen, setRetailContractOpen] = useState(false);
+  const [purchaseAgreementOpen, setPurchaseAgreementOpen] = useState(false);
   const [preBuildLetterOpen, setPreBuildLetterOpen] = useState(false);
   const [lienNoticeOpen, setLienNoticeOpen] = useState(false);
   const [cancellationNoticeOpen, setCancellationNoticeOpen] = useState(false);
@@ -1073,6 +1075,7 @@ export default function Pipeline({ session }) {
                     <button onClick={() => setContractorAgreementOpen(true)} style={{ background:"#8b5cf622", border:"1px solid #8b5cf6", color:"#a78bfa", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>🤝 Inspection Agreement{selected.contractorAgreement?.homeownerSignature ? " ✓" : ""}</button>
                     <button onClick={() => setContractFillOpen(true)} style={{ background:GOLD+"22", border:`1px solid ${GOLD}`, color:GOLD, borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>📝 Roofing Contract{selected.contract?.ownerSignature && selected.contract?.contractorSignature ? " ✓" : ""}</button>
                     <button onClick={() => setRetailContractOpen(true)} style={{ background:"#0ea5e922", border:"1px solid #0ea5e9", color:"#38bdf8", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>🧾 Retail Contract{selected.retailContract?.ownerSignature && selected.retailContract?.contractorSignature ? " ✓" : ""}</button>
+                    <button onClick={() => setPurchaseAgreementOpen(true)} style={{ background:"#a78bfa22", border:"1px solid #a78bfa", color:"#a78bfa", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>📋 Purchase Agreement{selected.purchaseAgreement?.ownerSignature && selected.purchaseAgreement?.contractorSignature ? " ✓" : ""}</button>
                     <button onClick={() => setPreBuildLetterOpen(true)} style={{ background:"#10b98122", border:"1px solid #10b981", color:"#10b981", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>🏗️ Pre-Build Letter{selected.preBuildLetter?.homeownerSignature ? " ✓" : ""}</button>
                     <button onClick={() => setLienNoticeOpen(true)} style={{ background:"#f9731622", border:"1px solid #f97316", color:"#fb923c", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>⚖️ Lien Notice{selected.lienNotice?.ownerSignature ? " ✓" : ""}</button>
                     <button onClick={() => setCancellationNoticeOpen(true)} style={{ background:"#f8717122", border:"1px solid #f87171", color:"#f87171", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>📄 Cancellation Notice{selected.cancellationNotice?.companySignature ? " ✓" : ""}</button>
@@ -1368,6 +1371,11 @@ export default function Pipeline({ session }) {
       {/* RETAIL CONTRACT */}
       {retailContractOpen && selected && (
         <RetailContract job={selected} onSave={(d) => { updateJob(selected.id, { retailContract: d }); }} onClose={() => setRetailContractOpen(false)} />
+      )}
+
+      {/* PURCHASE AGREEMENT (trade-specific: Roofing / Windows & Doors / Siding / Deck) */}
+      {purchaseAgreementOpen && selected && (
+        <PurchaseAgreement job={selected} onSave={(d) => { updateJob(selected.id, { purchaseAgreement: d }); }} onClose={() => setPurchaseAgreementOpen(false)} />
       )}
 
       {/* PRE-BUILD LETTER */}
