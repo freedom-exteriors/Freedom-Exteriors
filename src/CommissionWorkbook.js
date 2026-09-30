@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { exportCommissionWorkbook } from "./pdfExport";
+import { TRADES } from "./purchaseAgreementSchema";
 
 const TEAL = "#1a9e99"; const GOLD = "#e8a820"; const DARK = "#080d14";
 const PANEL = "#0f1923"; const PANEL2 = "#162030"; const BORDER = "#1e3048";
@@ -83,6 +84,35 @@ function CostInput({ label, value, onChange }) {
   );
 }
 
+function PurchaseAgreementRef({ job, onUse }) {
+  const pa = job.purchaseAgreement;
+  if (!pa) return (
+    <div style={{ background: PANEL2, border: `1px dashed ${BORDER}`, borderRadius: 8, padding: "10px 12px", fontSize: 12, color: MUTED, marginBottom: 14 }}>
+      No Purchase Agreement on file for this job yet.
+    </div>
+  );
+  const trade = TRADES[pa.trade] || TRADES.roofing;
+  const signed = pa.ownerSignature && pa.contractorSignature;
+  const total = parseFloat(pa.totalPrice) || 0;
+  return (
+    <div style={{ background: `${TEAL}11`, border: `1px solid ${TEAL}44`, borderRadius: 8, padding: "12px 14px", marginBottom: 14, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+      <div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: TEAL, textTransform: "uppercase", letterSpacing: 0.5 }}>Purchase Agreement — {trade.label}</div>
+        <div style={{ fontSize: 12, color: MUTED, marginTop: 3 }}>
+          Total Price: <span style={{ color: TEXT, fontWeight: 700, fontFamily: "monospace" }}>{fmt(total)}</span>
+          {pa.downPayment ? <> · Down Payment: <span style={{ color: TEXT, fontFamily: "monospace" }}>{fmt(parseFloat(pa.downPayment) || 0)}</span></> : ""}
+          <span style={{ marginLeft: 8, color: signed ? "#10b981" : "#f87171" }}>{signed ? "✓ Signed" : "Not yet signed"}</span>
+        </div>
+      </div>
+      {total > 0 && (
+        <button onClick={() => onUse(total)} style={{ background: `${TEAL}22`, border: `1px solid ${TEAL}`, color: TEAL, borderRadius: 7, padding: "8px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+            Use as Gross Revenue →
+          </button>
+      )}
+    </div>
+  );
+}
+
 export default function CommissionWorkbook({ job, isAdmin, onSave, onClose }) {
   const c = job.commission || {};
   const [local, setLocal] = useState({ ...c, tier: c.tier || 30 });
@@ -130,6 +160,7 @@ export default function CommissionWorkbook({ job, isAdmin, onSave, onClose }) {
         {/* Step 1: Revenue */}
         <div style={{ background: PANEL, border: `1px solid ${BORDER}`, borderRadius: 10, padding: 18 }}>
           <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 800, fontSize: 14, color: GOLD, marginBottom: 14, textTransform: "uppercase", letterSpacing: 1 }}>Step 1 — Job Revenue</div>
+          <PurchaseAgreementRef job={job} onUse={(total) => set("grossRevenue")(total)} />
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
             <label style={{ flex: 1, fontSize: 13, color: MUTED }}>A. Gross Job Revenue</label>
             <div style={{ position: "relative" }}>

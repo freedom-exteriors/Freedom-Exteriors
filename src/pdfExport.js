@@ -424,8 +424,13 @@ export function exportCommissionWorkbook(data, job, isParLead) {
     return `<tr><td style="padding:4px 8px;font-size:9.5pt;color:#555">${r.name || "(unnamed)"} (${pct}%)</td><td style="padding:4px 8px;font-size:9.5pt;text-align:right;font-family:monospace">${fmt(amount)}</td></tr>`;
   }).join("");
 
+  const pa = job?.purchaseAgreement;
+  const paTrade = pa ? (TRADES[pa.trade] || TRADES.roofing) : null;
+  const paSigned = pa && pa.ownerSignature && pa.contractorSignature;
+
   const html = `
     <div class="doc-title"><h1>Commission Workbook</h1><h2>${job?.name || ""} · ${job?.address || ""}</h2></div>
+    ${pa ? `<div class="notice-box teal" style="margin-bottom:14px"><strong>Purchase Agreement on file — ${paTrade.label}.</strong> Total Price ${fmt(parseFloat(pa.totalPrice) || 0)} · ${paSigned ? "Signed" : "Not yet signed"}</div>` : ""}
     <div class="section"><div class="section-title">Step 1 — Job Revenue</div><div class="section-body">
       <table style="width:100%;border-collapse:collapse">
         <tr><td style="padding:4px 8px;font-size:10pt">A. Gross Job Revenue</td><td style="padding:4px 8px;font-size:10pt;text-align:right;font-family:monospace;font-weight:700">${fmt(gross)}</td></tr>
