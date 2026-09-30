@@ -324,16 +324,24 @@ General Contractor License #BC-810020 | Phone: (651) 283-1689`
 };
 
 async function loadJobs() {
-  try {
-    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 8000));
-    const query = supabase.from("jobs").select("*").eq("user_email", "all");
-    const { data, error } = await Promise.race([query, timeout]);
-    if (error) throw error;
-    return (data || []).map(r => r.data).filter(Boolean);
-  } catch (e) {
-    console.error("Failed to load jobs:", e);
-    return [];
+  // Throws on failure/timeout instead of swallowing — callers decide how to
+  // handle that (retry, show an error) rather than silently rendering an
+  // empty board that looks identical to "you have no jobs."
+  const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 15000));
+  const query = supabase.from("jobs").select("*").eq("user_email", "all");
+  const { data, error } = await Promise.race([query, timeout]);
+  if (error) throw error;
+  return (data || []).map(r => r.data).filter(Boolean);
+}
+
+// Retries a couple times (cold Supabase compute / weak mobile signal can
+// easily blow past one timeout) before giving up.
+async function loadJobsWithRetry(attempts = 3) {
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    try { return await loadJobs(); } catch (e) { lastErr = e; if (i < attempts - 1) await new Promise(r => setTimeout(r, 1000 * (i + 1))); }
   }
+  throw lastErr;
 }
 async function persistJobs(jobs) {
   const list = Array.isArray(jobs) ? jobs : [jobs];
@@ -438,13 +446,25 @@ export default function Pipeline({ session }) {
   const [staffNames, setStaffNames] = useState([]);
   useEffect(() => {
     const email = (session?.user?.email || "").toLowerCase();
-    supabase.from("staff").select("email,name,role").then(({ data, error }) => {
+    let cancelled = false;
+    // A network hiccup or cold Supabase compute here must never be mistaken
+    // for "you're not a team member" — retry before showing that screen.
+    (async () => {
+      let data, error;
+      for (let i = 0; i < 3; i++) {
+        ({ data, error } = await supabase.from("staff").select("email,name,role"));
+        if (!error) break;
+        if (i < 2) await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+      }
+      if (cancelled) return;
       if (error) { console.error("Failed to load staff:", error); setStaffProfile(null); return; }
       setStaffProfile((data || []).find(r => r.email === email) || null);
       setStaffNames([...new Set((data || []).map(r => r.name))].sort());
-    });
+    })();
+    return () => { cancelled = true; };
   }, [session]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [saveStatus, setSaveStatus] = useState("saved");
   const [saveError, setSaveError] = useState(null);
   const [mainView, setMainView] = useState("board");
@@ -480,7 +500,12 @@ export default function Pipeline({ session }) {
   const [materialsCatalog, setMaterialsCatalog] = useState([]);
   const [abcFilter, setAbcFilter] = useState("All");
 
-  useEffect(() => { loadJobs().then(d => { setJobs(d.filter(j => !RESERVED_IDS.includes(j.id))); }).catch(() => {}).finally(() => { setLoading(false); }); }, []);
+  useEffect(() => {
+    loadJobsWithRetry()
+      .then(d => { setJobs(d.filter(j => !RESERVED_IDS.includes(j.id))); setLoadError(false); })
+      .catch(e => { console.error("Failed to load jobs:", e); setLoadError(true); })
+      .finally(() => { setLoading(false); });
+  }, []);
   useEffect(() => { loadPricingConfig().then(setPricing); }, []);
   useEffect(() => { loadMaterialsCatalog().then(setMaterialsCatalog); }, []);
 
@@ -691,6 +716,16 @@ export default function Pipeline({ session }) {
       <div style={{ fontWeight:800, fontSize:28, letterSpacing:4 }}><span style={{ color:TEAL }}>FREEDOM </span><span style={{ color:GOLD }}>EXTERIORS</span></div>
       <div style={{ color:TEAL, fontWeight:700, letterSpacing:3, fontSize:11 }}>LOADING YOUR JOBS…</div>
       <div style={{ color:MUTED, fontSize:11, marginTop:4 }}>If this takes more than a few seconds, <span onClick={() => window.location.reload()} style={{ color:GOLD, cursor:"pointer", textDecoration:"underline" }}>tap here to reload</span>.</div>
+    </div>
+  );
+
+  if (loadError) return (
+    <div style={{ minHeight:"100vh", background:DARK, color:TEXT, fontFamily:"'Barlow','Segoe UI',sans-serif", display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
+      <div style={{ textAlign:"center", maxWidth:360 }}>
+        <div style={{ fontWeight:800, fontSize:18, marginBottom:8, color:"#f87171" }}>Couldn't load your jobs</div>
+        <div style={{ color:MUTED, fontSize:13, marginBottom:16 }}>The connection to the server timed out. This isn't "no jobs" — it's a connection problem. Check your signal/Wi-Fi and try again.</div>
+        <button onClick={() => window.location.reload()} style={{ background:"#e8a820", color:"#000", border:"none", borderRadius:8, padding:"10px 18px", fontWeight:800, fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>Retry</button>
+      </div>
     </div>
   );
 
