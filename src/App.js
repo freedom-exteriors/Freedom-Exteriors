@@ -13,8 +13,6 @@ const linkParams = () => new URLSearchParams(window.location.hash.replace(/^#/, 
 export default function App() {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [qbToken, setQbToken] = useState(null);
-  const [qbRealm, setQbRealm] = useState(null);
   const [recovery, setRecovery] = useState(() => window.location.pathname === RESET_PATH || linkParams().get("type") === "recovery");
   const [resetLinkError] = useState(() => (window.location.pathname === RESET_PATH ? linkParams().get("error_description") : null));
 
@@ -29,25 +27,16 @@ export default function App() {
       setSession(session);
     });
 
-    // Check for QuickBooks callback params
+    // Back from connecting QuickBooks / Hover: say how it went, then tidy the URL.
+    // (Tokens stay on the server; older versions kept them in localStorage.)
+    ["qb_token", "qb_realm", "qb_refresh_token"].forEach(k => localStorage.removeItem(k));
     const params = new URLSearchParams(window.location.search);
-    const token = params.get("qb_token");
-    const realm = params.get("qb_realm");
-    const refresh = params.get("qb_refresh");
-    if (token && realm) {
-      setQbToken(token);
-      setQbRealm(realm);
-      localStorage.setItem("qb_token", token);
-      localStorage.setItem("qb_realm", realm);
-      if (refresh) localStorage.setItem("qb_refresh_token", refresh);
+    const result = { connected: "connected", cancelled: "wasn't connected (cancelled)", expired: "wasn't connected — the login took too long, please try again", failed: "couldn't be connected — please try again" };
+    const qb = params.get("qb");
+    const hover = params.get("hover");
+    if (qb || hover) {
       window.history.replaceState({}, "", "/");
-    } else {
-      const savedToken = localStorage.getItem("qb_token");
-      const savedRealm = localStorage.getItem("qb_realm");
-      if (savedToken && savedRealm) {
-        setQbToken(savedToken);
-        setQbRealm(savedRealm);
-      }
+      setTimeout(() => alert(`${qb ? "QuickBooks" : "Hover"} ${result[qb || hover] || "connection finished"}.`), 300);
     }
 
     return () => subscription.unsubscribe();
@@ -74,5 +63,5 @@ export default function App() {
     }} />;
   }
 
-  return session ? <Pipeline session={session} qbToken={qbToken} qbRealm={qbRealm} /> : <Login />;
+  return session ? <Pipeline session={session} /> : <Login />;
 }

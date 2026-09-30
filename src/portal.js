@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "./supabase";
+import { compressImage, blobToDataUrl } from "./photos";
 
 const TEAL = "#1a9e99"; const GOLD = "#e8a820"; const DARK = "#080d14";
 const PANEL = "#0f1923"; const PANEL2 = "#162030"; const BORDER = "#1e3048";
@@ -22,7 +23,8 @@ export default function Portal({ token }) {
   const [tab, setTab] = useState("status");
   const [message, setMessage] = useState("");
   const [msgSent, setMsgSent] = useState(false);
-  const [, setPhotos] = useState([]);
+  const [photos, setPhotos] = useState([]);
+  const [photoError, setPhotoError] = useState(null);
   const [photoUploading, setPhotoUploading] = useState(false);
   const [payingDeposit, setPayingDeposit] = useState(false);
 
@@ -164,19 +166,38 @@ export default function Portal({ token }) {
     setMsgSent(true);
   };
 
-  const uploadPhotos = async (files) => {
+  const loadPhotos = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/portal-photos?token=${encodeURIComponent(token)}`);
+      const out = await res.json();
+      if (res.ok) setPhotos(out.photos || []);
+    } catch (e) { /* photos are optional; the rest of the portal still works */ }
+  }, [token]);
+  useEffect(() => { loadPhotos(); }, [loadPhotos]);
+
+  const uploadPhotos = async (fileList) => {
+    const files = Array.from(fileList || []).slice(0, 10);
+    if (!files.length) return;
     setPhotoUploading(true);
-    const readers = Array.from(files).map(file => new Promise(res => {
-      const r = new FileReader();
-      r.onload = e => res({ id: Date.now() + Math.random(), url: e.target.result, name: file.name, cat: "Homeowner Upload", added: new Date().toLocaleDateString() });
-      r.readAsDataURL(file);
-    }));
-    const newPhotos = await Promise.all(readers);
-    const { data: updated, error } = await supabase.rpc("portal_add_photos", { p_token: token, p_photos: newPhotos });
-    if (!error && updated) {
-      setJob(updated);
-      setPhotos(prev => [...prev, ...newPhotos]);
+    setPhotoError(null);
+    let failed = 0;
+    let lastError = null;
+    for (const file of files) {
+      try {
+        const blob = await compressImage(file);
+        const dataUrl = await blobToDataUrl(blob);
+        const res = await fetch("/api/portal-photos", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token, name: file.name, dataUrl }),
+        });
+        if (!res.ok) { failed++; lastError = (await res.json().catch(() => ({}))).error; }
+      } catch (e) {
+        failed++;
+      }
     }
+    if (failed) setPhotoError(lastError || `${failed} photo${failed === 1 ? "" : "s"} didn't upload. Please try again, or text them to your rep.`);
+    await loadPhotos();
     setPhotoUploading(false);
   };
 
@@ -298,10 +319,10 @@ export default function Portal({ token }) {
                 )}
               </div>
             )}
-            {job.notes && (
+            {job.homeownerNote && (
               <div style={{ background:PANEL, borderRadius:7, padding:"10px 12px", border:`1px solid ${BORDER}` }}>
                 <div style={{ color:MUTED, fontSize:9, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:5 }}>Notes from your rep</div>
-                <div style={{ fontSize:13, lineHeight:1.6 }}>{job.notes}</div>
+                <div style={{ fontSize:13, lineHeight:1.6 }}>{job.homeownerNote}</div>
               </div>
             )}
           </div>
@@ -365,15 +386,16 @@ export default function Portal({ token }) {
             <div style={{ fontWeight:700, fontSize:15, marginBottom:4 }}>📷 Upload Photos</div>
             <div style={{ color:MUTED, fontSize:12, marginBottom:14 }}>Upload photos of damage, your roof, or anything relevant to your claim.</div>
             <label style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:10, cursor:"pointer", background:PANEL2, border:`2px dashed ${BORDER}`, borderRadius:9, padding:"20px", marginBottom:14 }}>
-              <input type="file" accept="image/*" multiple style={{ display:"none" }} onChange={e => uploadPhotos(e.target.files)}/>
+              <input type="file" accept="image/*" multiple style={{ display:"none" }} disabled={photoUploading} onChange={e => { uploadPhotos(e.target.files); e.target.value = ""; }}/>
               <span style={{ fontSize:28 }}>📷</span>
-              <div><div style={{ fontWeight:700, fontSize:14 }}>{photoUploading?"Uploading…":"Tap to Upload Photos"}</div><div style={{ color:MUTED, fontSize:11 }}>JPG, PNG — multiple allowed</div></div>
+              <div><div style={{ fontWeight:700, fontSize:14 }}>{photoUploading?"Uploading…":"Tap to Upload Photos"}</div><div style={{ color:MUTED, fontSize:11 }}>JPG, PNG — up to 10 at a time</div></div>
             </label>
-            {(job.photos||[]).filter(p => p.cat==="Homeowner Upload").length > 0 && (
+            {photoError && <div style={{ color:"#f87171", fontSize:12, marginBottom:12 }}>{photoError}</div>}
+            {photos.length > 0 && (
               <div>
                 <div style={{ fontSize:11, color:GOLD, fontWeight:700, marginBottom:8 }}>Your Uploads</div>
                 <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8 }}>
-                  {(job.photos||[]).filter(p => p.cat==="Homeowner Upload").map(ph => (
+                  {photos.filter(ph => ph.url).map(ph => (
                     <img key={ph.id} src={ph.url} alt={ph.name} style={{ width:"100%", height:90, objectFit:"cover", borderRadius:7, border:`1px solid ${BORDER}` }}/>
                   ))}
                 </div>

@@ -1,27 +1,17 @@
-// Hover OAuth + measurements. The Hover token is stored in a reserved jobs row
-// (user_email = "hover_token"), read/written only with the service role key.
-import { requireStaff, supabaseAdmin } from "./_lib/supabase.js";
+// Hover OAuth + measurements. The Hover token is kept server-side in
+// integration_tokens (service role only).
+import { requireStaff } from "./_lib/supabase.js";
+import { APP_ORIGIN, getIntegration, setIntegration, createOAuthState, consumeOAuthState } from "./_lib/integrations.js";
 
 const HOVER_TOKEN_URL = "https://hover.to/oauth/token";
 const HOVER_API_BASE = "https://hover.to/api/v3";
 // Must exactly match the redirect URI registered on the Hover integration
 // (Hover > Settings > Developer > Freedom Exteriors CRM). vercel.json rewrites
 // it to /api/hover?action=callback.
-const REDIRECT_URI = "https://freedom-exteriors.vercel.app/api/hover/callback";
+const REDIRECT_URI = `${APP_ORIGIN}/api/hover/callback`;
 
-async function getStoredToken() {
-  const { data } = await supabaseAdmin().from("jobs").select("data").eq("user_email", "hover_token").maybeSingle();
-  return data?.data || null;
-}
-
-async function storeToken(tokenData) {
-  const db = supabaseAdmin();
-  if (await getStoredToken()) {
-    await db.from("jobs").update({ data: tokenData }).eq("user_email", "hover_token");
-  } else {
-    await db.from("jobs").insert({ user_email: "hover_token", data: tokenData });
-  }
-}
+const getStoredToken = () => getIntegration("hover");
+const storeToken = (tokenData) => setIntegration("hover", tokenData);
 
 async function requestToken(params) {
   const res = await fetch(HOVER_TOKEN_URL, {
@@ -49,22 +39,28 @@ async function getValidToken() {
 export default async function handler(req, res) {
   const action = req.query.action;
 
-  if (action === "auth") {
-    const authUrl = `https://hover.to/oauth/authorize?client_id=${process.env.HOVER_CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code`;
-    return res.redirect(authUrl);
+  // A signed-in staff member starts the Hover login; the one-time state proves the
+  // callback belongs to that login (so nobody can attach their own Hover account).
+  if (action === "start" && req.method === "POST") {
+    const staff = await requireStaff(req, res);
+    if (!staff) return;
+    const state = await createOAuthState("hover", staff.email);
+    const params = new URLSearchParams({ client_id: process.env.HOVER_CLIENT_ID, redirect_uri: REDIRECT_URI, response_type: "code", state });
+    return res.status(200).json({ url: `https://hover.to/oauth/authorize?${params}` });
   }
 
   if (action === "callback") {
-    const { code } = req.query;
-    if (!code) return res.status(400).json({ error: "No code received" });
+    const { code, state } = req.query;
+    if (!(await consumeOAuthState("hover", state))) return res.redirect(`${APP_ORIGIN}/?hover=expired`);
+    if (!code) return res.redirect(`${APP_ORIGIN}/?hover=failed`);
     const tokenData = await requestToken({ grant_type: "authorization_code", code, redirect_uri: REDIRECT_URI });
-    if (!tokenData.access_token) return res.status(400).json({ error: "Token exchange failed" });
+    if (!tokenData.access_token) return res.redirect(`${APP_ORIGIN}/?hover=failed`);
     await storeToken({
       access_token: tokenData.access_token,
       refresh_token: tokenData.refresh_token,
       expires_at: Date.now() + (tokenData.expires_in || 3600) * 1000,
     });
-    return res.redirect("/?hover_connected=true");
+    return res.redirect(`${APP_ORIGIN}/?hover=connected`);
   }
 
   if (action === "measurements" && req.method === "GET") {
@@ -74,7 +70,7 @@ export default async function handler(req, res) {
 
     try {
       const token = await getValidToken();
-      // 401 tells the app to send the user through Hover's login (action=auth).
+      // 401 tells the app to send the user through Hover's login (action=start).
       if (!token) return res.status(401).json({ error: "Hover isn't connected yet" });
 
       const jobRes = await fetch(`${HOVER_API_BASE}/jobs/${hoverId}`, { headers: { Authorization: `Bearer ${token}` } });

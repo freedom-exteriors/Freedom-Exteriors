@@ -13,6 +13,7 @@ import DocsAcknowledgement from "./DocsAcknowledgement";
 import GoodBetterBest, { PricingSettings, MaterialsCatalogSettings, DEFAULT_PRICING } from "./GoodBetterBest";
 import QuickQuote from "./QuickQuote";
 import ScopeReview from "./ScopeReview";
+import { compressImage, uploadJobPhoto, usePhotoUrls, deleteJobPhotoFiles, movePhotosToStorage } from "./photos";
 /* eslint-disable react-hooks/exhaustive-deps */
 const TEAL = "#1a9e99"; const GOLD = "#e8a820"; const DARK = "#080d14";
 const PANEL = "#0f1923"; const PANEL2 = "#162030"; const BORDER = "#1e3048";
@@ -424,10 +425,42 @@ async function saveMaterialsCatalog(catalog) {
   }
 }
 
+// Google review link for the "job complete" text (REACT_APP_GOOGLE_REVIEW_URL in Vercel).
+const REVIEW_URL = (process.env.REACT_APP_GOOGLE_REVIEW_URL || "").trim();
+
+// Portal links are the homeowner's only key to their job page, so make them unguessable.
+function newPortalToken() {
+  if (window.crypto?.randomUUID) return window.crypto.randomUUID().replace(/-/g, "");
+  const bytes = new Uint8Array(16);
+  window.crypto.getRandomValues(bytes);
+  return Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
+}
+
+// What the homeowner has done in their portal (signature, deposit).
+function PortalActivity({ job }) {
+  const signed = !!job.portalSignature;
+  const paid = !!job.depositPaid;
+  if (!signed && !paid && !job.portal_token) return null;
+  const row = (ok, text) => (
+    <div style={{ display:"flex", alignItems:"center", gap:8, fontSize:13, marginTop:4 }}>
+      <span style={{ color: ok ? GREEN : MUTED, fontWeight:800 }}>{ok ? "✓" : "○"}</span><span style={{ color: ok ? TEXT : MUTED }}>{text}</span>
+    </div>
+  );
+  const when = d => (d ? new Date(d).toLocaleString() : "");
+  return (
+    <div style={{ background:PANEL2, borderRadius:7, padding:"10px 12px", marginBottom:12 }}>
+      <div style={{ color:MUTED, fontSize:9, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:2 }}>Homeowner Portal</div>
+      {row(signed, signed ? `Signed by ${job.portalSignature}${job.portalSignedAt ? " · " + when(job.portalSignedAt) : ""}` : "Not signed in portal yet")}
+      {row(paid, paid ? `Deposit paid${job.depositAmountPaid ? ` $${Number(job.depositAmountPaid).toLocaleString()}` : ""}${job.depositPaidAt ? " · " + when(job.depositPaidAt) : ""}` : "Deposit not paid yet")}
+      {signed && job.portalSignatureImage && <img src={job.portalSignatureImage} alt="Homeowner signature" style={{ maxWidth:220, marginTop:8, background:"#fff", borderRadius:4, padding:4 }}/>}
+    </div>
+  );
+}
+
 const blank = () => ({
   id: Date.now(), name:"", address:"", city:"", state:"MN", phone:"", email:"",
   type:"Roof", stage:"lead", claimNum:"", insurer:"State Farm", adjuster:"", adjPhone:"",
-  hoverId:"", notes:"", followUp:false, assigned:"", parLead:false,
+  hoverId:"", notes:"", homeownerNote:"", followUp:false, assigned:"", parLead:false,
   added: new Date().toISOString().slice(0,10),
   photos:[], checklist:{}, materials:[], estimate:{total:0,downPayment:0,scope:"",deductible:0},
   contract:null, commission:{grossRevenue:0},
@@ -498,6 +531,7 @@ export default function Pipeline({ session }) {
   const [photoUploadCat, setPhotoUploadCat] = useState("Damage");
   const [pendingPhotos, setPendingPhotos] = useState([]);
   useEffect(() => { setPendingPhotos([]); }, [selected?.id]);
+  const photoUrls = usePhotoUrls(selected?.photos);
   const [pricing, setPricing] = useState(DEFAULT_PRICING);
   const [materialsCatalog, setMaterialsCatalog] = useState([]);
   const [abcFilter, setAbcFilter] = useState("All");
@@ -584,6 +618,16 @@ export default function Pipeline({ session }) {
     setSelected(prev => prev?.id === id ? { ...prev, ...patch } : prev);
   }, [updateJobs]);
 
+  // Realtime/polling refreshes land in `jobs`; keep the open job's panel current too
+  // (e.g. a homeowner signs or pays while the rep is looking at the job).
+  useEffect(() => {
+    setSelected(prev => {
+      if (!prev) return prev;
+      const fresh = jobs.find(j => j.id === prev.id);
+      return fresh && fresh !== prev ? fresh : prev;
+    });
+  }, [jobs]);
+
   const followUps = jobs.filter(j => j.followUp);
   const stageObj = id => STAGES.find(s => s.id === id) || STAGES[0];
 
@@ -602,18 +646,25 @@ export default function Pipeline({ session }) {
   const saveJob = () => {
     if (!form.name.trim()) return;
     const isNew = !editing;
-    const token = form.id + "-" + Math.random().toString(36).slice(2,8);
+    const token = newPortalToken();
     const jobWithToken = isNew ? { ...form, portal_token: token } : form;
     updateJobs(prev => editing ? prev.map(j => j.id === form.id ? jobWithToken : j) : [...prev, jobWithToken], [jobWithToken.id]);
-    if (isNew && form.email) {
+    if (isNew) {
       const portalLink = window.location.origin + "/portal/" + token;
-      if (isNew && form.phone) { apiFetch("/api/send-sms", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ to: form.phone, message: `Hi ${form.name}! Freedom Exteriors here. We have received your project info. Track your progress here: ${portalLink}` }) }).catch(e => console.warn("SMS failed:", e)); }
-      apiFetch("/api/send-email", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ to: form.email, homeownerName: form.name, jobType: form.type, portalLink }) });
+      if (form.phone) { apiFetch("/api/send-sms", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ to: form.phone, message: `Hi ${form.name}! Freedom Exteriors here. We have received your project info. Track your progress here: ${portalLink}` }) }).catch(e => console.warn("SMS failed:", e)); }
+      if (form.email) { apiFetch("/api/send-email", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ to: form.email, homeownerName: form.name, jobType: form.type, portalLink }) }).catch(e => console.warn("Email failed:", e)); }
     }
     setShowForm(false);
   };
 
-  const removeJob = id => { setJobs(prev => prev.filter(j => j.id !== id)); deleteJobRow(id); setSelected(null); };
+  const removeJob = id => {
+    const job = jobs.find(j => j.id === id);
+    if (!window.confirm(`Delete ${job?.name || "this job"} and all its photos? This can't be undone.`)) return;
+    setJobs(prev => prev.filter(j => j.id !== id));
+    deleteJobRow(id);
+    deleteJobPhotoFiles(job).catch(e => console.warn("Couldn't delete photo files:", e));
+    setSelected(null);
+  };
 
   const savePricing = async (newPricing) => {
     setPricing(newPricing);
@@ -630,7 +681,7 @@ export default function Pipeline({ session }) {
     const next = STAGES[idx + dir];
     if (!next) return;
     updateJob(job.id, { stage: next.id });
-    if (next && next.id === "collected" && job.phone) { apiFetch("/api/send-sms", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ to: job.phone, message: `Hi ${job.name}! Your project with Freedom Exteriors is complete. Thank you for choosing us! Please leave us a review: https://g.page/r/YOUR_GOOGLE_REVIEW_LINK` }) }).catch(e => console.warn("SMS failed:", e)); }
+    if (next && next.id === "collected" && job.phone) { apiFetch("/api/send-sms", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ to: job.phone, message: `Hi ${job.name}! Your project with Freedom Exteriors is complete. Thank you for choosing us!${REVIEW_URL ? ` Please leave us a review: ${REVIEW_URL}` : ""}` }) }).catch(e => console.warn("SMS failed:", e)); }
   };
 
   const toggleFollowUp = id => updateJob(id, { followUp: !jobs.find(j => j.id === id)?.followUp });
@@ -641,20 +692,50 @@ export default function Pipeline({ session }) {
     updateJob(jobId, { checklist: { ...current, [checkId]: !current[checkId] } });
   };
 
-  const stagePhotos = (files, cat) => {
-    const readers = Array.from(files).map(file => new Promise(res => {
-      const r = new FileReader();
-      r.onload = e => res({ id: Date.now() + Math.random(), url: e.target.result, name: file.name, cat: cat || "Damage" });
-      r.readAsDataURL(file);
-    }));
-    Promise.all(readers).then(staged => setPendingPhotos(p => [...p, ...staged]));
+  const stagePhotos = async (files, cat) => {
+    const staged = [];
+    for (const file of Array.from(files)) {
+      try {
+        const blob = await compressImage(file);
+        staged.push({ id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()), blob, preview: URL.createObjectURL(blob), name: file.name, cat: cat || "Damage" });
+      } catch (e) {
+        alert(`Couldn't read ${file.name}. Try a JPG or PNG.`);
+      }
+    }
+    setPendingPhotos(p => [...p, ...staged]);
   };
 
-  const savePendingPhotos = (jobId) => {
-    const job = jobs.find(j => j.id === jobId);
-    const toSave = pendingPhotos.map(p => ({ ...p, added: new Date().toLocaleDateString() }));
-    updateJob(jobId, { photos: [...(job?.photos || []), ...toSave] });
-    setPendingPhotos([]);
+  const [photoSaving, setPhotoSaving] = useState(false);
+  const savePendingPhotos = async (jobId) => {
+    setPhotoSaving(true);
+    const saved = [];
+    const failed = [];
+    for (const p of pendingPhotos) {
+      try { saved.push(await uploadJobPhoto(jobId, p.blob, { id: p.id, name: p.name, cat: p.cat })); }
+      catch (e) { console.error("Photo upload failed:", e); failed.push(p); }
+    }
+    if (saved.length) {
+      const job = jobs.find(j => j.id === jobId);
+      updateJob(jobId, { photos: [...(job?.photos || []), ...saved] });
+    }
+    pendingPhotos.filter(p => !failed.includes(p)).forEach(p => URL.revokeObjectURL(p.preview));
+    setPendingPhotos(failed);
+    setPhotoSaving(false);
+    if (failed.length) alert(`${failed.length} photo${failed.length === 1 ? "" : "s"} didn't upload — check your signal and tap Save again.`);
+  };
+
+  const [photoMove, setPhotoMove] = useState(null);
+  const legacyPhotoCount = jobs.reduce((n, j) => n + (j.photos || []).filter(p => !p.path && typeof p.url === "string" && p.url.startsWith("data:")).length, 0);
+  const runPhotoMove = async () => {
+    setPhotoMove({ done: 0, total: 0 });
+    const result = await movePhotosToStorage(jobs, async (jobId, photos) => {
+      const job = { ...jobs.find(j => j.id === jobId), photos };
+      setJobs(prev => prev.map(j => j.id === jobId ? { ...j, photos } : j));
+      setSelected(prev => prev?.id === jobId ? { ...prev, photos } : prev);
+      await persistJobs(job);
+    }, (done, total) => setPhotoMove({ done, total }));
+    setPhotoMove(null);
+    alert(`Moved ${result.moved} photo${result.moved === 1 ? "" : "s"} to storage${result.failed ? ` — ${result.failed} couldn't be moved (they still show as before)` : ""}.`);
   };
 
   const addMaterial = (jobId, item) => {
@@ -706,9 +787,48 @@ export default function Pipeline({ session }) {
       const res = await apiFetch(`/api/hover?action=measurements&hoverId=${encodeURIComponent(job.hoverId)}`);
       const data = await res.json();
       if (data.success) { updateJob(job.id, { hoverMeasurements: data.measurements }); alert("Hover measurements loaded!"); }
-      else if (res.status === 401) { window.location.href = "/api/hover?action=auth"; }
+      else if (res.status === 401) {
+        if (!window.confirm("Hover isn't connected (or the connection expired). Log in to Hover now?")) return;
+        const start = await apiFetch("/api/hover?action=start", { method: "POST" });
+        const out = await start.json().catch(() => ({}));
+        if (out.url) window.location.href = out.url; else alert(out.error || "Couldn't start the Hover login.");
+      }
       else { alert("Error: " + data.error); }
     } catch (e) { alert("Failed to fetch Hover data."); }
+  };
+
+  // QuickBooks: tokens stay on the server; the app only asks for status / actions.
+  const [qbStatus, setQbStatus] = useState(null);
+  useEffect(() => {
+    if (!isAdmin) return;
+    apiFetch("/api/quickbooks?action=status").then(r => r.json()).then(setQbStatus).catch(() => setQbStatus(null));
+  }, [isAdmin]);
+  const connectQuickBooks = async () => {
+    if (qbStatus?.connected && !window.confirm(`QuickBooks is connected${qbStatus.company ? ` to ${qbStatus.company}` : ""}. Reconnect (e.g. to switch companies)?`)) return;
+    const res = await apiFetch("/api/quickbooks?action=start", { method: "POST" });
+    const out = await res.json().catch(() => ({}));
+    if (out.url) window.location.href = out.url; else alert(out.error || "Couldn't start the QuickBooks connection.");
+  };
+  const [qbInvoicing, setQbInvoicing] = useState(false);
+  const createQbInvoice = async (job) => {
+    if (!window.confirm(`Create a QuickBooks invoice for ${job.name} — $${Number(job.estimate?.total || 0).toLocaleString()}?`)) return;
+    setQbInvoicing(true);
+    try {
+      const res = await apiFetch("/api/quickbooks?action=invoice", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jobId: job.id }) });
+      const out = await res.json().catch(() => ({}));
+      if (res.ok && out.success) {
+        updateJob(job.id, { qbInvoiceId: out.invoiceId, qbInvoiceDocNumber: out.docNumber, qbInvoicedAt: new Date().toISOString() });
+        alert(`Invoice ${out.docNumber || out.invoiceId} created in QuickBooks.`);
+      } else if (res.status === 401) {
+        if (window.confirm(`${out.error || "QuickBooks isn't connected."} Connect now?`)) connectQuickBooks();
+      } else {
+        alert(out.error || "QuickBooks invoice failed.");
+      }
+    } catch (e) {
+      alert("Couldn't reach QuickBooks — check your connection.");
+    } finally {
+      setQbInvoicing(false);
+    }
   };
 
   const sf = v => v === undefined ? "" : v;
@@ -765,7 +885,7 @@ export default function Pipeline({ session }) {
           {!isMobile && isAdmin && <button onClick={() => setPricingSettingsOpen(true)} style={{ background:"none", border:"1px solid #fbbf24", color:"#fbbf24", borderRadius:8, padding:"8px 14px", fontWeight:700, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>📐 Pricing</button>}
           {!isMobile && isAdmin && <button onClick={() => setMaterialsCatalogOpen(true)} style={{ background:"none", border:"1px solid #a78bfa", color:"#a78bfa", borderRadius:8, padding:"8px 14px", fontWeight:700, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>🧱 Materials</button>}
           {staffProfile && <button onClick={() => setQuickQuoteOpen(true)} title="Quick Quote" style={{ background:"none", border:"1px solid #38bdf8", color:"#38bdf8", borderRadius:8, padding:isMobile?"6px 10px":"8px 14px", fontWeight:700, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>🧮{!isMobile && " Quick Quote"}</button>}
-          {!isMobile && isAdmin && <button onClick={() => window.location.href = "/api/quickbooks?action=auth"} style={{ background:"none", border:"1px solid #2CA01C", color:"#2CA01C", borderRadius:8, padding:"8px 14px", fontWeight:700, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>🔗 QB</button>}
+          {!isMobile && isAdmin && <button onClick={connectQuickBooks} title={qbStatus?.connected ? `QuickBooks connected${qbStatus.company ? ": " + qbStatus.company : ""}` : "Connect QuickBooks"} style={{ background:"none", border:"1px solid #2CA01C", color:"#2CA01C", borderRadius:8, padding:"8px 14px", fontWeight:700, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>{qbStatus?.connected ? "✓ QB" : "🔗 QB"}</button>}
           <button onClick={() => supabase.auth.signOut()} style={{ background:"none", border:`1px solid ${BORDER}`, color:MUTED, borderRadius:8, padding:isMobile?"6px 10px":"8px 14px", fontWeight:700, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>{isMobile?"↪":"Sign Out"}</button>
           <button onClick={openNew} style={{ background:GOLD, color:"#000", border:"none", borderRadius:8, padding:isMobile?"8px 14px":"8px 18px", fontWeight:800, fontSize:isMobile?12:13, cursor:"pointer", fontFamily:"inherit" }}>+ {isMobile?"New":"NEW JOB"}</button>
         </div>
@@ -778,6 +898,18 @@ export default function Pipeline({ session }) {
             <strong>⚠ Save failed.</strong> {saveError || "Your last change may not have been saved."} Changes on screen are not confirmed in the database.
           </div>
           <button onClick={resync} style={{ background:"#f87171", color:"#000", border:"none", borderRadius:6, padding:"6px 14px", fontWeight:700, fontSize:12, cursor:"pointer", fontFamily:"inherit", flexShrink:0 }}>Reload from server</button>
+        </div>
+      )}
+
+      {/* One-time: old photos are stored inside the job records, which makes every load slow */}
+      {isAdmin && legacyPhotoCount > 0 && (
+        <div style={{ background:PANEL2, borderBottom:`1px solid ${GOLD}66`, padding:"10px 16px", display:"flex", alignItems:"center", justifyContent:"space-between", gap:12 }}>
+          <div style={{ fontSize:13, color:TEXT }}>
+            <strong style={{ color:GOLD }}>{legacyPhotoCount} older photo{legacyPhotoCount===1?"":"s"}</strong> are stored the old way, which slows the app down for everyone. Move them to photo storage (one time, keep this tab open).
+          </div>
+          <button disabled={!!photoMove} onClick={runPhotoMove} style={{ background:GOLD, color:"#000", border:"none", borderRadius:6, padding:"6px 14px", fontWeight:700, fontSize:12, cursor:"pointer", fontFamily:"inherit", flexShrink:0 }}>
+            {photoMove ? `Moving… ${photoMove.done}/${photoMove.total || "?"} jobs` : "Move photos"}
+          </button>
         </div>
       )}
 
@@ -1058,7 +1190,9 @@ export default function Pipeline({ session }) {
                       </div>
                     </div>
                   )}
-                  {selected.notes && <div style={{ background:PANEL2, borderRadius:7, padding:"10px 12px", marginBottom:12 }}><div style={{ color:MUTED, fontSize:9, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:4 }}>Notes</div><div style={{ fontSize:13, lineHeight:1.6 }}>{selected.notes}</div></div>}
+                  {selected.notes && <div style={{ background:PANEL2, borderRadius:7, padding:"10px 12px", marginBottom:12 }}><div style={{ color:MUTED, fontSize:9, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:4 }}>Internal Notes</div><div style={{ fontSize:13, lineHeight:1.6 }}>{selected.notes}</div></div>}
+                  {selected.homeownerNote && <div style={{ background:PANEL2, borderRadius:7, padding:"10px 12px", marginBottom:12 }}><div style={{ color:MUTED, fontSize:9, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:4 }}>Note for Homeowner (visible in portal)</div><div style={{ fontSize:13, lineHeight:1.6 }}>{selected.homeownerNote}</div></div>}
+                  <PortalActivity job={selected}/>
 
                   {/* Stage buttons */}
                   <div style={{ display:"flex", gap:8, marginBottom:12, alignItems:"center" }}>
@@ -1083,9 +1217,11 @@ export default function Pipeline({ session }) {
                     <button onClick={() => setCommissionOpen(true)} style={{ background:GREEN+"22", border:`1px solid ${GREEN}`, color:GREEN, borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>💰 Commission{selected.commission?.grossRevenue ? " ✓" : ""}</button>
                     <button onClick={() => setGbbOpen(true)} style={{ background:"#fbbf2422", border:"1px solid #fbbf24", color:"#fbbf24", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>📐 Good/Better/Best{selected.gbb?.sqFt ? " ✓" : ""}</button>
                     {isAdmin && <button onClick={() => setScopeReviewOpen(true)} style={{ background:"#38bdf822", border:"1px solid #38bdf8", color:"#38bdf8", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>🔎 Scope Review{selected.scopeReviews?.length ? ` (${selected.scopeReviews.length})` : ""}</button>}
-                    <button onClick={async () => { const token = selected.portal_token || (selected.id + "-" + Math.random().toString(36).slice(2,8)); if (!selected.portal_token) updateJob(selected.id, { portal_token: token }); const link = `${window.location.origin}/portal/${token}`; navigator.clipboard.writeText(link); alert("Portal link copied!"); }} style={{ background:GOLD+"22", border:`1px solid ${GOLD}`, color:GOLD, borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>🔗 Portal Link</button>
+                    <button onClick={async () => { const token = selected.portal_token || newPortalToken(); if (!selected.portal_token) updateJob(selected.id, { portal_token: token }); const link = `${window.location.origin}/portal/${token}`; navigator.clipboard.writeText(link); alert("Portal link copied!"); }} style={{ background:GOLD+"22", border:`1px solid ${GOLD}`, color:GOLD, borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>🔗 Portal Link</button>
                     {isAdmin && selected.stage === "collected" && (
-                      <button onClick={async () => { const refreshToken = localStorage.getItem("qb_refresh_token"); if (refreshToken) { try { const refreshRes = await fetch("/api/quickbooks?action=refresh", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({refreshToken}) }); const refreshData = await refreshRes.json(); if (refreshData.access_token) { localStorage.setItem("qb_token", refreshData.access_token); localStorage.setItem("qb_refresh_token", refreshData.refresh_token); } } catch(e) { console.warn("Token refresh failed"); } } const res = await fetch("/api/quickbooks?action=invoice", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({realmId:localStorage.getItem("qb_realm"),accessToken:localStorage.getItem("qb_token"),job:selected}) }); const data = await res.json(); if (data.success) alert("Invoice created in QuickBooks!"); else alert("Error. Try reconnecting QuickBooks."); }} style={{ background:"#2CA01C22", border:"1px solid #2CA01C", color:"#2CA01C", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>📊 QB Invoice</button>
+                      selected.qbInvoiceId
+                        ? <span style={{ background:"#2CA01C11", border:"1px solid #2CA01C66", color:"#2CA01C", borderRadius:7, padding:"10px 14px", fontSize:13, fontWeight:700 }}>📊 QB Invoice {selected.qbInvoiceDocNumber || selected.qbInvoiceId} ✓</span>
+                        : <button disabled={qbInvoicing} onClick={() => createQbInvoice(selected)} style={{ background:"#2CA01C22", border:"1px solid #2CA01C", color:"#2CA01C", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700, opacity:qbInvoicing?0.6:1 }}>{qbInvoicing ? "Creating invoice…" : "📊 QB Invoice"}</button>
                     )}
                     {selected.installDate && <button onClick={() => openGoogleCalendar(selected)} style={{ background:"#1a73e822", border:"1px solid #1a73e8", color:"#1a73e8", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>📅 Add to Calendar</button>}
                     {selected.hoverId && <button onClick={() => fetchHoverMeasurements(selected)} style={{ background:"#ff6b2222", border:"1px solid #ff6b22", color:"#ff6b22", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>📐 Fetch Measurements</button>}
@@ -1258,27 +1394,27 @@ export default function Pipeline({ session }) {
                       <div style={{ display:"grid", gridTemplateColumns:isMobile?"repeat(3,1fr)":"repeat(4,1fr)", gap:6, marginBottom:10 }}>
                         {pendingPhotos.map(ph => (
                           <div key={ph.id} style={{ position:"relative", borderRadius:6, overflow:"hidden", border:`1px solid ${GOLD}66` }}>
-                            <img src={ph.url} alt={ph.name} style={{ width:"100%", height:80, objectFit:"cover", display:"block" }}/>
-                            <button onClick={() => setPendingPhotos(p => p.filter(x => x.id !== ph.id))}
+                            <img src={ph.preview} alt={ph.name} style={{ width:"100%", height:80, objectFit:"cover", display:"block" }}/>
+                            <button onClick={() => { URL.revokeObjectURL(ph.preview); setPendingPhotos(p => p.filter(x => x.id !== ph.id)); }}
                               style={{ position:"absolute", top:3, right:3, background:"rgba(0,0,0,0.7)", border:"none", color:"#f87171", borderRadius:5, width:20, height:20, fontSize:12, cursor:"pointer", lineHeight:1 }}>✕</button>
                           </div>
                         ))}
                       </div>
                       <div style={{ display:"flex", gap:8 }}>
                         <button onClick={() => setPendingPhotos([])} style={{ flex:1, background:"none", border:`1px solid ${BORDER}`, color:MUTED, borderRadius:7, padding:"10px", fontWeight:700, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>Discard</button>
-                        <button onClick={() => savePendingPhotos(selected.id)} style={{ flex:2, background:"#10b981", color:"#000", border:"none", borderRadius:7, padding:"10px", fontWeight:800, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>💾 Save {pendingPhotos.length} Photo{pendingPhotos.length===1?"":"s"}</button>
+                        <button disabled={photoSaving} onClick={() => savePendingPhotos(selected.id)} style={{ flex:2, opacity:photoSaving?0.6:1, background:"#10b981", color:"#000", border:"none", borderRadius:7, padding:"10px", fontWeight:800, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>{photoSaving ? "Uploading…" : `💾 Save ${pendingPhotos.length} Photo${pendingPhotos.length===1?"":"s"}`}</button>
                       </div>
                     </div>
                   )}
 
                   {(selected.photos||[]).length === 0 && pendingPhotos.length === 0 && <div style={{ textAlign:"center", color:MUTED, padding:"20px 0" }}>No photos yet.</div>}
-                  {PHOTO_CATS.filter(cat => (selected.photos||[]).some(p => p.cat===cat)).map(cat => (
+                  {[...PHOTO_CATS, ...new Set((selected.photos||[]).map(p => p.cat).filter(c => !PHOTO_CATS.includes(c)))].filter(cat => (selected.photos||[]).some(p => p.cat===cat)).map(cat => (
                     <div key={cat} style={{ marginBottom:14 }}>
                       <div style={{ fontSize:11, color:GOLD, fontWeight:700, marginBottom:6 }}>{cat}</div>
                       <div style={{ display:"grid", gridTemplateColumns:isMobile?"repeat(3,1fr)":"repeat(4,1fr)", gap:6 }}>
                         {(selected.photos||[]).filter(p => p.cat===cat).map(ph => (
                           <div key={ph.id} style={{ position:"relative", borderRadius:6, overflow:"hidden", border:`1px solid ${BORDER}` }}>
-                            <img src={ph.url} alt={ph.name} onClick={() => setLightbox(ph)} style={{ width:"100%", height:80, objectFit:"cover", display:"block", cursor:"pointer" }}/>
+                            <img src={photoUrls[ph.id]} alt={ph.name} onClick={() => setLightbox({ ...ph, url: photoUrls[ph.id] })} style={{ width:"100%", height:80, objectFit:"cover", display:"block", cursor:"pointer", background:PANEL2 }}/>
                           </div>
                         ))}
                       </div>
@@ -1326,8 +1462,12 @@ export default function Pipeline({ session }) {
               </div>
               {form.hoverId && <a href={`https://hover.to/jobs/${form.hoverId}`} target="_blank" rel="noopener noreferrer" style={{ color:GOLD, fontSize:12, fontWeight:700, textDecoration:"none" }}>Open in Hover ↗</a>}
             </Sec>
-            <Sec title="Notes">
+            <Sec title="Internal Notes (team only)">
               <textarea value={form.notes} onChange={e => setForm(p=>({...p,notes:e.target.value}))} placeholder="Supplement details, material specs, special instructions..." rows={3}
+                style={{ width:"100%", background:PANEL2, border:`1px solid ${BORDER}`, borderRadius:7, color:TEXT, padding:"10px", fontSize:13, fontFamily:"inherit", boxSizing:"border-box", resize:"vertical" }}/>
+            </Sec>
+            <Sec title="Note for Homeowner (shows in their portal)">
+              <textarea value={form.homeownerNote || ""} onChange={e => setForm(p=>({...p,homeownerNote:e.target.value}))} placeholder="e.g. Crew arrives 7am Tuesday — please move cars out of the driveway." rows={2}
                 style={{ width:"100%", background:PANEL2, border:`1px solid ${BORDER}`, borderRadius:7, color:TEXT, padding:"10px", fontSize:13, fontFamily:"inherit", boxSizing:"border-box", resize:"vertical" }}/>
             </Sec>
             <label style={{ display:"flex", alignItems:"center", gap:8, cursor:"pointer", marginBottom:10, fontSize:13 }}>

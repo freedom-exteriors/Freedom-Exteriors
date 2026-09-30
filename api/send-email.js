@@ -10,7 +10,7 @@ export default async function handler(req, res) {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Authorization": `Bearer ${process.env.REACT_APP_RESEND_KEY}`,
+      "Authorization": `Bearer ${process.env.RESEND_API_KEY || process.env.REACT_APP_RESEND_KEY}`,
     },
     body: JSON.stringify({
       from: "Freedom Exteriors <nick@freedom-exteriors.com>",

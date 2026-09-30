@@ -1,37 +1,83 @@
-# Bid Mailer — CSV Import (Step 2)
+# Freedom Exteriors CRM
 
-## 1. Unzip into your repo
-Unzip this so the folders land at the root of your existing repo (same level
-as `package.json`). It should merge in as:
+React (Create React App) front end plus Vercel serverless functions in `api/`,
+backed by Supabase project `klfrqwplazjryeppamtk`. Deploys from `main` to
+https://freedom-exteriors.vercel.app.
+
+## What's where
+
+| Area | Files |
+| --- | --- |
+| Pipeline / job board (staff) | `src/Pipeline.js` and the document components in `src/` |
+| Homeowner portal (`/portal/<token>`, no login) | `src/portal.js` |
+| Job photos (private `job-photos` bucket, signed URLs) | `src/photos.js`, `api/portal-photos.js` |
+| Text / email | `api/send-sms.js` (Twilio), `api/send-email.js` (Resend), `api/send-reminders.js` (daily cron) |
+| Deposits | `api/create-checkout-session.js`, `api/confirm-deposit.js` (Stripe) |
+| QuickBooks invoices | `api/quickbooks.js` |
+| Hover measurements | `api/hover.js` |
+| Scope review (Claude) | `api/scope-review.js`, `src/ScopeReview.js` |
+| Database changes | `supabase/migrations/` |
+
+## How data is protected
+
+- **Staff** sign in with Supabase Auth and must be on the `staff` table.
+  Row-level security: admins see every job; reps see jobs assigned to them.
+- **Homeowners** only reach their job through the portal link. The portal uses
+  `portal_*` database functions that return portal-safe fields only. Internal
+  **Notes** never reach the portal; the **Note for Homeowner** field does.
+- A database trigger (`jobs_preserve_portal_fields`) stops a save from an
+  out-of-date screen from erasing a homeowner's signature, deposit, photos, the
+  portal link or a QuickBooks invoice marker.
+- QuickBooks / Hover tokens live in `integration_tokens` (server only). OAuth
+  logins use a one-time state value.
+
+## Environment variables (Vercel)
+
+| Name | Used for |
+| --- | --- |
+| `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` | server routes (service role — never in `src/`) |
+| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` | texts |
+| `RESEND_API_KEY` (or legacy `REACT_APP_RESEND_KEY`) | email |
+| `STRIPE_SECRET_KEY`, `REACT_APP_STRIPE_PUBLISHABLE_KEY` | deposits |
+| `QB_CLIENT_ID`, `QB_CLIENT_SECRET` | QuickBooks (production keys). Optional `QB_ENVIRONMENT=sandbox`, `QB_ITEM_ID` |
+| `HOVER_CLIENT_ID`, `HOVER_CLIENT_SECRET` | Hover |
+| `ANTHROPIC_API_KEY` | scope review |
+| `GOOGLE_SOLAR_API_KEY` | roof size lookup |
+| `CRON_SECRET` | reminder cron |
+| `REACT_APP_GOOGLE_REVIEW_URL` | review link in the "job complete" text (optional) |
+| `APP_ORIGIN` | optional, defaults to https://freedom-exteriors.vercel.app |
+
+Anything starting with `REACT_APP_` can end up in the browser bundle, so never
+give a secret that prefix unless it's meant to be public.
+
+## Adding a staff member
+
+1. Supabase → Authentication → Add user (email + temporary password).
+2. Add a row to the `staff` table with their email, name (must match the
+   "Assigned To" name on their jobs) and role `rep` or `admin`.
+
+## Local development
 
 ```
-your-repo/
-  lib/csv-import/parseHailTraceCsv.js
-  scripts/import-hailtrace-csv.mjs
-  test-fixtures/sample_export.csv
-  test-fixtures/run-parser-test.mjs
+npm install
+npm start          # front end only; /api routes run on Vercel
+npm test
 ```
 
-## 2. Install dependencies
-```
-npm install papaparse @supabase/supabase-js
-```
+## HailTrace CSV import (bid mailer)
 
-## 3. Make sure your repo's package.json has `"type": "module"`
-Open `package.json` and confirm this line exists at the top level:
-```json
-"type": "module",
-```
-(If it's already there — likely, since your CRM is React/Vercel — skip this.)
+`scripts/import-hailtrace-csv.mjs` loads a HailTrace export into
+`mail_campaigns` / `mail_targets` (both have row-level security on; the script
+uses the service role key from your local `.env`).
 
-## 4. Sanity-check the parser (no DB, no network, no risk)
+### a. Sanity-check the parser (no DB, no network, no risk)
 ```
 node test-fixtures/run-parser-test.mjs
 ```
 You should see 9/9 "PASS" lines. If anything fails, stop and paste the output
 back to me before going further.
 
-## 5. Dry-run against a REAL HailTrace export
+### b. Dry-run against a REAL HailTrace export
 Export a storm event's addresses from HailTrace (Company Settings → Export
 Data), then:
 ```
@@ -42,7 +88,7 @@ zip/homeowner name) all matched real columns. If `address` didn't match,
 open `lib/csv-import/parseHailTraceCsv.js`, find `HEADER_ALIASES`, and add
 your CSV's actual header text to the `address` array.
 
-## 6. Set your Supabase credentials
+### c. Set your Supabase credentials
 Add to your `.env` (or Vercel project env vars):
 ```
 SUPABASE_URL=https://klfrqwplazjryeppamtk.supabase.co
@@ -51,8 +97,8 @@ SUPABASE_SERVICE_ROLE_KEY=<get this from Supabase dashboard → Project Settings
 The service role key is secret — never expose it in frontend code, only in
 server-side scripts/env.
 
-## 7. Real import (writes to your database)
-Drop `--dry-run` once step 5 looks correct:
+### d. Real import (writes to your database)
+Drop `--dry-run` once step b looks correct:
 ```
 node scripts/import-hailtrace-csv.mjs --file=./path/to/real_export.csv --campaign="Storm Name"
 ```
@@ -60,9 +106,3 @@ It will create the campaign (or reuse one with that exact name), skip
 anything already imported for that campaign, and write a
 `*.skipped-report.csv` next to your source file listing anything it couldn't
 import and why.
-
-## Known open item (not yet fixed — needs your decision)
-`mail_campaigns` and `mail_targets` currently have **Row Level Security
-disabled**, unlike the rest of your CRM's tables. That means the anon key can
-read/write every row until you enable it. Tell me what access rules you want
-(e.g. "service role only") and I'll apply it directly.
