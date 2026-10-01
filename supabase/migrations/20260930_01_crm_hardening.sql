@@ -24,6 +24,7 @@ begin
   if new.data is null then new.data := '{}'::jsonb; end if;
 
   foreach k in array array['depositPaid','depositPaidAt','depositStripeSession','depositAmountPaid',
+                           'depositPendingSession','depositPendingAt',
                            'portalSignature','portalSignatureImage','portalSignedAt',
                            'qbInvoiceId','qbInvoiceDocNumber','qbInvoicedAt'] loop
     if old.data ? k and old.data->k is not null and old.data->k not in ('null'::jsonb, 'false'::jsonb, '""'::jsonb) then

@@ -29,7 +29,12 @@ const STAGES = [
   { id: "installed",  label: "Installed",   color: TEAL,      icon: "🔨" },
   { id: "collected",  label: "Paid in Full",   color: "#10b981", icon: "💰" },
 ];
-const REP_EMAILS = { Nick: "nick@freedom-exteriors.com", Victor: "victor@freedom-exteriors.com", Brett: "brett@freedom-exteriors.com" };
+// A rep's email comes from the staff roster: their company address if they have
+// one, otherwise whatever address they sign in with.
+function repEmail(name, staff) {
+  const mine = (staff || []).filter(r => r.name === name).map(r => r.email);
+  return mine.find(e => /@freedom-exteriors\.com$/i.test(e)) || mine[0] || "";
+}
 
 // Fields a rep fills in during an inspection/sales visit, mapped to job schema keys.
 // Order here = order in the email template AND the paste-in preview.
@@ -43,8 +48,8 @@ const REP_FIELDS = [
   { label: "NOTES",           key: "notes", multiline: true },
 ];
 
-function buildRepEmail(job) {
-  const to = REP_EMAILS[job.assigned] || "";
+function buildRepEmail(job, staff) {
+  const to = repEmail(job.assigned, staff);
   const subject = `Job Info Needed — ${job.name} (${job.address}, ${job.city})`;
   const known = [
     ["CUSTOMER NAME", job.name], ["ADDRESS", job.address], ["CITY", job.city], ["STATE", job.state],
@@ -66,11 +71,14 @@ ${blanks}
   return { to, subject, body };
 }
 
-function parseRepEmail(text) {
+// Reads a rep's filled-in reply. Handles quoted replies ("> HOVER ID: 123"),
+// and stops the notes at the end of what the rep wrote (signature, "On ... wrote:",
+// the quoted original, the reference block).
+const REPLY_END = /^\s*(--\s*$|sent from my|get outlook|on .+ wrote:|-----\s*original message|from:\s|--- for your reference|freedom exteriors — job info request)/i;
+export function parseRepEmail(text) {
   const result = {};
-  const lines = text.split("\n");
-  for (let i = 0; i < REP_FIELDS.length; i++) {
-    const field = REP_FIELDS[i];
+  const lines = String(text || "").replace(/\r/g, "").split("\n").map(l => l.replace(/^\s*(>\s*)+/, ""));
+  for (const field of REP_FIELDS) {
     const re = new RegExp(`^\\s*${field.label}\\s*:\\s*(.*)$`, "i");
     const lineIdx = lines.findIndex(l => re.test(l));
     if (lineIdx === -1) continue;
@@ -78,13 +86,20 @@ function parseRepEmail(text) {
     if (field.multiline) {
       const rest = [];
       for (let j = lineIdx + 1; j < lines.length; j++) {
+        if (REPLY_END.test(lines[j])) break;
         const isNextLabel = REP_FIELDS.some(f => new RegExp(`^\\s*${f.label}\\s*:`, "i").test(lines[j]));
         if (isNextLabel) break;
         rest.push(lines[j]);
       }
       value = [value, ...rest].join("\n").trim();
     }
-    if (value) result[field.key] = field.numeric ? (parseFloat(value.replace(/[^0-9.]/g, "")) || 0) : value;
+    if (!value) continue;
+    if (field.numeric) {
+      const n = parseFloat(value.replace(/[^0-9.]/g, ""));
+      if (Number.isFinite(n)) result[field.key] = n;
+    } else {
+      result[field.key] = value;
+    }
   }
   return result;
 }
@@ -436,6 +451,23 @@ function newPortalToken() {
   return Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
 }
 
+// Dollar input that keeps what's being typed ("1500.", "0.5") and saves the number.
+function MoneyInput({ value, onChange, style, placeholder = "0" }) {
+  const [text, setText] = useState(value ? String(value) : "");
+  const [focused, setFocused] = useState(false);
+  useEffect(() => { if (!focused) setText(value ? String(value) : ""); }, [value, focused]);
+  return (
+    <input type="text" inputMode="decimal" value={text} placeholder={placeholder} style={style}
+      onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
+      onChange={e => {
+        const t = e.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1");
+        setText(t);
+        const n = parseFloat(t);
+        onChange(Number.isFinite(n) ? Math.round(n * 100) / 100 : 0);
+      }}/>
+  );
+}
+
 // What the homeowner has done in their portal (signature, deposit).
 function PortalActivity({ job }) {
   const signed = !!job.portalSignature;
@@ -478,6 +510,7 @@ export default function Pipeline({ session }) {
   // Role + roster come from the `staff` table; RLS enforces what each role can load/save.
   const [staffProfile, setStaffProfile] = useState(undefined); // undefined = loading, null = no access
   const [staffNames, setStaffNames] = useState([]);
+  const [staffRoster, setStaffRoster] = useState([]);
   useEffect(() => {
     const email = (session?.user?.email || "").toLowerCase();
     let cancelled = false;
@@ -494,6 +527,7 @@ export default function Pipeline({ session }) {
       if (error) { console.error("Failed to load staff:", error); setStaffProfile(null); return; }
       setStaffProfile((data || []).find(r => r.email === email) || null);
       setStaffNames([...new Set((data || []).map(r => r.name))].sort());
+      setStaffRoster(data || []);
     })();
     return () => { cancelled = true; };
   }, [session]);
@@ -643,6 +677,13 @@ export default function Pipeline({ session }) {
   const openNew = () => { setForm({ ...blank(), assigned: staffProfile?.name || "" }); setEditing(false); setShowForm(true); setSelected(null); };
   const openEdit = (job) => { setForm({...job}); setEditing(true); setShowForm(true); setSelected(null); };
 
+  // Texts/emails to homeowners: tell the rep if one didn't go out, instead of failing silently.
+  const notifyHomeowner = (url, payload, what) => {
+    apiFetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
+      .then(async res => { if (!res.ok) { const out = await res.json().catch(() => ({})); throw new Error(typeof out.error === "string" ? out.error : `error ${res.status}`); } })
+      .catch(e => alert(`${what} didn't send: ${e.message}`));
+  };
+
   const saveJob = () => {
     if (!form.name.trim()) return;
     const isNew = !editing;
@@ -651,8 +692,8 @@ export default function Pipeline({ session }) {
     updateJobs(prev => editing ? prev.map(j => j.id === form.id ? jobWithToken : j) : [...prev, jobWithToken], [jobWithToken.id]);
     if (isNew) {
       const portalLink = window.location.origin + "/portal/" + token;
-      if (form.phone) { apiFetch("/api/send-sms", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ to: form.phone, message: `Hi ${form.name}! Freedom Exteriors here. We have received your project info. Track your progress here: ${portalLink}` }) }).catch(e => console.warn("SMS failed:", e)); }
-      if (form.email) { apiFetch("/api/send-email", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ to: form.email, homeownerName: form.name, jobType: form.type, portalLink }) }).catch(e => console.warn("Email failed:", e)); }
+      if (form.phone) notifyHomeowner("/api/send-sms", { to: form.phone, message: `Hi ${form.name}! Freedom Exteriors here. We have received your project info. Track your progress here: ${portalLink}` }, `Welcome text to ${form.name}`);
+      if (form.email) notifyHomeowner("/api/send-email", { to: form.email, homeownerName: form.name, jobType: form.type, portalLink }, `Welcome email to ${form.name}`);
     }
     setShowForm(false);
   };
@@ -680,8 +721,9 @@ export default function Pipeline({ session }) {
     const idx = STAGES.findIndex(s => s.id === job.stage);
     const next = STAGES[idx + dir];
     if (!next) return;
-    updateJob(job.id, { stage: next.id });
-    if (next && next.id === "collected" && job.phone) { apiFetch("/api/send-sms", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ to: job.phone, message: `Hi ${job.name}! Your project with Freedom Exteriors is complete. Thank you for choosing us!${REVIEW_URL ? ` Please leave us a review: ${REVIEW_URL}` : ""}` }) }).catch(e => console.warn("SMS failed:", e)); }
+    const thankYou = next.id === "collected" && job.phone && !job.thankYouTextSentAt;
+    updateJob(job.id, { stage: next.id, ...(thankYou ? { thankYouTextSentAt: new Date().toISOString() } : {}) });
+    if (thankYou) notifyHomeowner("/api/send-sms", { to: job.phone, message: `Hi ${job.name}! Your project with Freedom Exteriors is complete. Thank you for choosing us!${REVIEW_URL ? ` Please leave us a review: ${REVIEW_URL}` : ""}` }, `Thank-you text to ${job.name}`);
   };
 
   const toggleFollowUp = id => updateJob(id, { followUp: !jobs.find(j => j.id === id)?.followUp });
@@ -1137,7 +1179,7 @@ export default function Pipeline({ session }) {
               {jobTab==="details" && (
                 <div>
                   {isAdmin && <div style={{ display:"flex", gap:8, marginBottom:12, flexWrap:"wrap" }}>
-                    <a href={(() => { const e = buildRepEmail(selected); return `mailto:${e.to}?subject=${encodeURIComponent(e.subject)}&body=${encodeURIComponent(e.body)}`; })()}
+                    <a href={(() => { const e = buildRepEmail(selected, staffRoster); return `mailto:${e.to}?subject=${encodeURIComponent(e.subject)}&body=${encodeURIComponent(e.body)}`; })()}
                       style={{ background:"none", border:"1px solid #38bdf8", color:"#38bdf8", borderRadius:7, padding:"7px 12px", fontWeight:700, fontSize:11, textDecoration:"none", fontFamily:"inherit" }}>
                       📧 Email to Rep{selected.assigned && selected.assigned!=="Nick" ? ` (${selected.assigned})` : ""}
                     </a>
@@ -1237,8 +1279,8 @@ export default function Pipeline({ session }) {
                     {[["Total Job Value","total"],["Down Payment","downPayment"],["Deductible","deductible"]].map(([label, key]) => (
                       <div key={key}>
                         <label style={{ fontSize:10, color:MUTED, textTransform:"uppercase", letterSpacing:1, display:"block", marginBottom:4 }}>{label}</label>
-                        <input type="number" value={selected.estimate?.[key]||""} onChange={e => updateJob(selected.id, { estimate: { ...(selected.estimate||{}), [key]: parseFloat(e.target.value)||0 } })}
-                          style={{ width:"100%", background:PANEL2, border:`1px solid ${BORDER}`, borderRadius:7, color:TEXT, padding:"10px", fontSize:14, fontFamily:"inherit", boxSizing:"border-box" }} placeholder="0"/>
+                        <MoneyInput value={selected.estimate?.[key]} onChange={n => updateJob(selected.id, { estimate: { ...(selected.estimate||{}), [key]: n } })}
+                          style={{ width:"100%", background:PANEL2, border:`1px solid ${BORDER}`, borderRadius:7, color:TEXT, padding:"10px", fontSize:14, fontFamily:"inherit", boxSizing:"border-box" }}/>
                       </div>
                     ))}
                     <div>
@@ -1253,6 +1295,10 @@ export default function Pipeline({ session }) {
                       placeholder="Describe materials, scope, specifications..." rows={5}
                       style={{ width:"100%", background:PANEL2, border:`1px solid ${BORDER}`, borderRadius:7, color:TEXT, padding:"10px", fontSize:13, fontFamily:"inherit", boxSizing:"border-box", resize:"vertical" }}/>
                   </div>
+                  {selected.estimate?.downPayment > 0 && selected.estimate?.total > 0 && selected.estimate.downPayment > selected.estimate.total && (
+                    <div style={{ color:"#f87171", fontSize:12, marginBottom:10 }}>⚠ Down payment is more than the total job value — the homeowner's portal will ask them to pay the down payment amount.</div>
+                  )}
+                  {selected.depositPaid && <div style={{ color:GREEN, fontSize:12, marginBottom:10 }}>✓ Deposit already paid through the portal — changing the down payment won't charge the homeowner again.</div>}
                   {selected.estimate?.total > 0 && (
                     <div style={{ background:PANEL2, borderRadius:8, padding:14 }}>
                       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, textAlign:"center" }}>
@@ -1603,9 +1649,9 @@ export default function Pipeline({ session }) {
                     {f.multiline ? (
                       <textarea value={importPreview[f.key]} onChange={e => setImportPreview(p => ({ ...p, [f.key]: e.target.value }))}
                         style={{ width:"100%", minHeight:70, background:PANEL2, border:`1px solid ${BORDER}`, borderRadius:7, color:TEXT, padding:10, fontSize:13, fontFamily:"inherit", boxSizing:"border-box", resize:"vertical" }}/>
-                    ) : (
-                      <input type={f.numeric ? "number" : "text"} value={importPreview[f.key]} onChange={e => setImportPreview(p => ({ ...p, [f.key]: f.numeric ? (parseFloat(e.target.value)||0) : e.target.value }))}
-                        style={{ width:"100%", background:PANEL2, border:`1px solid ${BORDER}`, borderRadius:7, color:TEXT, padding:10, fontSize:13, fontFamily:"inherit", boxSizing:"border-box" }}/>
+                    ) : (f.numeric
+                        ? <MoneyInput value={importPreview[f.key]} onChange={n => setImportPreview(p => ({ ...p, [f.key]: n }))} style={{ width:"100%", background:PANEL2, border:`1px solid ${BORDER}`, borderRadius:7, color:TEXT, padding:10, fontSize:13, fontFamily:"inherit", boxSizing:"border-box" }}/>
+                        : <input type="text" value={importPreview[f.key]} onChange={e => setImportPreview(p => ({ ...p, [f.key]: e.target.value }))} style={{ width:"100%", background:PANEL2, border:`1px solid ${BORDER}`, borderRadius:7, color:TEXT, padding:10, fontSize:13, fontFamily:"inherit", boxSizing:"border-box" }}/>
                     )}
                   </div>
                 ))}
@@ -1616,6 +1662,9 @@ export default function Pipeline({ session }) {
                       const estUpdates = {};
                       Object.entries(importPreview).forEach(([key, val]) => {
                         if (key.startsWith("estimate.")) estUpdates[key.split(".")[1]] = val;
+                        // Imported notes are added below what's already there, not swapped in.
+                        else if (key === "notes" && (selected.notes || "").trim() && !(selected.notes || "").includes(String(val).trim()))
+                          updates.notes = `${selected.notes.trim()}\n\n[From rep email ${new Date().toLocaleDateString()}]\n${val}`;
                         else updates[key] = val;
                       });
                       if (Object.keys(estUpdates).length) updates.estimate = { ...(selected.estimate||{}), ...estUpdates };

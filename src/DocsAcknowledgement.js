@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback } from "react";
+import { useCloseGuard } from "./closeGuard";
 import { canvasPoint, SIGNATURE_INK } from "./signature";
 import { exportDocsAcknowledgement } from "./pdfExport";
 
@@ -88,7 +89,8 @@ export default function DocsAcknowledgement({ job, onSave, onClose }) {
   const [data, setData] = useState(job.docsAcknowledgement?.type === "docs-acknowledgement" ? job.docsAcknowledgement : blank(job));
   const [savedFlash, setSavedFlash] = useState(false);
   const set = (k) => (v) => setData(d => ({ ...d, [k]: v }));
-  const save = () => { onSave(data); setSavedFlash(true); setTimeout(() => setSavedFlash(false), 1800); };
+  const [closeDoc, rememberSaved] = useCloseGuard(data, onSave, onClose);
+  const save = () => { onSave(data); rememberSaved(data); setSavedFlash(true); setTimeout(() => setSavedFlash(false), 1800); };
   const allSigned = data.homeownerSignature && data.repSignature;
 
   return (
@@ -103,7 +105,7 @@ export default function DocsAcknowledgement({ job, onSave, onClose }) {
           {allSigned && <span style={{ color:"#10b981", fontSize:12, fontWeight:700 }}>✓ Signed</span>}
           {allSigned && <button onClick={() => exportDocsAcknowledgement(data, job)} style={{ background:"#fff2", border:"1px solid #fff4", color:TEXT, borderRadius:7, padding:"9px 14px", fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>📥 PDF</button>}
           <button onClick={save} style={{ background:`${TEAL}22`, border:`1px solid ${TEAL}`, color:TEAL, borderRadius:7, padding:"9px 16px", fontWeight:700, fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>💾 Save</button>
-          <button onClick={onClose} style={{ background:"none", border:`1px solid ${BORDER}`, color:MUTED, borderRadius:7, padding:"9px 14px", fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>✕ Close</button>
+          <button onClick={closeDoc} style={{ background:"none", border:`1px solid ${BORDER}`, color:MUTED, borderRadius:7, padding:"9px 14px", fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>✕ Close</button>
         </div>
       </div>
 

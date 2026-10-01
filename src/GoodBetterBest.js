@@ -273,12 +273,14 @@ export function calcGoodBetterBest({ sqFt, pitch, stories, pricing, baseOverride
     return { perSquare, total: perSquare * squares };
   };
 
+  // A product override only counts if it's a real price; otherwise use the tier default.
   const o = baseOverrides || {};
+  const pick = (override, fallback) => (Number.isFinite(parseFloat(override)) && parseFloat(override) > 0 ? override : fallback);
   return {
     squares, pitchPct, storyPct, totalMultiplier,
-    good: tier(o.good != null ? o.good : p.baseGood),
-    better: tier(o.better != null ? o.better : p.baseBetter),
-    best: tier(o.best != null ? o.best : p.baseBest),
+    good: tier(pick(o.good, p.baseGood)),
+    better: tier(pick(o.better, p.baseBetter)),
+    best: tier(pick(o.best, p.baseBest)),
   };
 }
 
@@ -296,11 +298,15 @@ export default function GoodBetterBest({ job, pricing, catalog, onSave, onClose,
   const [accessorySelections, setAccessorySelections] = useState(job.gbb?.accessorySelections || {});
 
   const findProduct = (id) => (catalog || []).find(p => String(p.id) === String(id));
-  const baseOverrides = {
-    good: productIds.good ? parseFloat(findProduct(productIds.good)?.ratePerSq) : null,
-    better: productIds.better ? parseFloat(findProduct(productIds.better)?.ratePerSq) : null,
-    best: productIds.best ? parseFloat(findProduct(productIds.best)?.ratePerSq) : null,
+  // A product picked earlier may since have been removed from the catalog (or have
+  // no rate): fall back to the default tier price instead of pricing at $0.
+  const productRate = (id) => {
+    if (!id) return null;
+    const rate = parseFloat(findProduct(id)?.ratePerSq);
+    return Number.isFinite(rate) && rate > 0 ? rate : null;
   };
+  const baseOverrides = { good: productRate(productIds.good), better: productRate(productIds.better), best: productRate(productIds.best) };
+  const missingProducts = ["good", "better", "best"].filter(t => productIds[t] && baseOverrides[t] == null);
   const result = calcGoodBetterBest({ sqFt, pitch, stories, pricing, baseOverrides });
 
   const accessories = (catalog || []).filter(i => i.itemType === "accessory");
@@ -411,6 +417,11 @@ export default function GoodBetterBest({ job, pricing, catalog, onSave, onClose,
               <span>Pitch surcharge: <strong style={{ color: result.pitchPct > 0 ? GOLD : TEXT }}>+{result.pitchPct}%</strong></span>
               <span>Story surcharge: <strong style={{ color: result.storyPct > 0 ? GOLD : TEXT }}>+{result.storyPct}%</strong></span>
             </div>
+            {missingProducts.length > 0 && (
+              <div style={{ color: "#f87171", fontSize: 12, marginTop: 8 }}>
+                ⚠ The product picked for {missingProducts.join(", ")} is no longer in the materials catalog (or has no $/sq) — using the default {missingProducts.length === 1 ? "price" : "prices"} for that tier. Pick a product again.
+              </div>
+            )}
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
               {[
