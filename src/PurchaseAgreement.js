@@ -143,13 +143,16 @@ function ChipRow({ row, value, onChange }) {
     <div style={{ padding: "10px 0", borderBottom: `1px solid ${BORDER}` }}>
       <div style={{ fontSize: 12.5, fontWeight: 700, color: TEXT, marginBottom: 8 }}>{row.label}</div>
       {row.options && row.options.length > 0 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: row.details === false ? 0 : 8 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 2, marginBottom: row.details === false ? 0 : 8 }}>
           {row.options.map(opt => {
             const on = selected.includes(opt);
             return (
               <button key={opt} type="button" onClick={() => toggle(opt)}
-                style={{ background: on ? `${TEAL}22` : "none", border: `1px solid ${on ? TEAL : BORDER}`, color: on ? TEAL : MUTED, borderRadius: 20, padding: "6px 12px", fontSize: 12, fontWeight: on ? 700 : 500, cursor: "pointer", fontFamily: "inherit" }}>
-                {on ? "✓ " : ""}{opt}
+                style={{ display: "flex", alignItems: "center", gap: 10, background: on ? `${TEAL}14` : "none", border: "none", borderRadius: 7, padding: "9px 6px", cursor: "pointer", fontFamily: "inherit", textAlign: "left", width: "100%" }}>
+                <span style={{ flexShrink: 0, width: 22, height: 22, borderRadius: 5, border: `2px solid ${on ? TEAL : MUTED}`, background: on ? TEAL : "none", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 900, color: DARK }}>
+                  {on ? "✕" : ""}
+                </span>
+                <span style={{ fontSize: 13.5, color: on ? TEXT : MUTED, fontWeight: on ? 700 : 500 }}>{opt}</span>
               </button>
             );
           })}
@@ -162,6 +165,49 @@ function ChipRow({ row, value, onChange }) {
           style={{ width: "100%", background: PANEL2, border: `1px solid ${BORDER}`, borderRadius: 7, color: TEXT, padding: "9px 11px", fontSize: 13.5, fontFamily: "inherit", boxSizing: "border-box" }}
         />
       )}
+    </div>
+  );
+}
+
+function money(n) {
+  const v = parseFloat(n);
+  return Number.isFinite(v) ? "$" + v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "";
+}
+
+// Reference card showing the job's Estimate / Good-Better-Best pricing with
+// one-click buttons to pull a number straight onto the agreement's Total Price.
+function PricingRef({ job, onUse }) {
+  const estTotal = parseFloat(job.estimate?.total) || 0;
+  const gbb = job.gbb?.result;
+  const tiers = gbb ? [
+    { key: "good", label: "Good", total: gbb.good?.total },
+    { key: "better", label: "Better", total: gbb.better?.total },
+    { key: "best", label: "Best", total: gbb.best?.total },
+  ].filter(t => t.total > 0) : [];
+
+  if (!estTotal && !tiers.length) return (
+    <div style={{ background: PANEL2, border: `1px dashed ${BORDER}`, borderRadius: 8, padding: "10px 12px", fontSize: 12, color: MUTED, marginBottom: 14 }}>
+      No Estimate or Good/Better/Best pricing on file for this job yet.
+    </div>
+  );
+
+  return (
+    <div style={{ background: `${TEAL}11`, border: `1px solid ${TEAL}44`, borderRadius: 8, padding: "12px 14px", marginBottom: 14 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: TEAL, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>Pricing on File — Pull onto this Agreement</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {estTotal > 0 && (
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: 12.5, color: TEXT }}>Current Estimate: <strong style={{ fontFamily: "monospace" }}>{money(estTotal)}</strong></span>
+            <button type="button" onClick={() => onUse(estTotal)} style={{ background: `${TEAL}22`, border: `1px solid ${TEAL}`, color: TEAL, borderRadius: 7, padding: "6px 10px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>Use →</button>
+          </div>
+        )}
+        {tiers.map(t => (
+          <div key={t.key} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: 12.5, color: TEXT }}>Good/Better/Best — {t.label}: <strong style={{ fontFamily: "monospace" }}>{money(t.total)}</strong></span>
+            <button type="button" onClick={() => onUse(Math.round(t.total * 100) / 100)} style={{ background: `${TEAL}22`, border: `1px solid ${TEAL}`, color: TEAL, borderRadius: 7, padding: "6px 10px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>Use →</button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -302,6 +348,7 @@ export default function PurchaseAgreement({ job, onSave, onClose }) {
           <div style={{ color: MUTED, fontSize: 12, lineHeight: 1.6, marginBottom: 12 }}>
             We hereby propose to furnish the labor and material in accordance with the above specifications, for the sum below. Payment Terms: the stated % is paid down on start date, with the remaining balance due upon substantial completion. Checks payable to Freedom Exteriors LLC. All sales tax included in Total Price.
           </div>
+          <PricingRef job={job} onUse={(total) => set("totalPrice")(total)} />
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14, marginBottom: 14 }}>
             <Field label="Payment Terms (% Down)" value={data.paymentTermsPct} onChange={set("paymentTermsPct")} type="number" />
             <Field label="Total Price ($)" value={data.totalPrice} onChange={set("totalPrice")} type="number" />
