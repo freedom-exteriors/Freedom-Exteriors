@@ -68,6 +68,19 @@ const css = `
   }
 `;
 
+// Everything typed into the CRM is escaped before it goes into the printable
+// page (which opens on our own origin), so names like "Smith & Sons" print
+// correctly and no text can turn into markup or script.
+function escHtml(v) {
+  return String(v).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function escDeep(v) {
+  if (typeof v === "string") return escHtml(v);
+  if (Array.isArray(v)) return v.map(escDeep);
+  if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, escDeep(x)]));
+  return v;
+}
+
 function wrap(title, body) {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -121,6 +134,8 @@ function openPrint(title, html) {
 // ─── Document Generators ────────────────────────────────────────────────────
 
 export function exportContractorAgreement(data, job) {
+  data = escDeep(data);
+  job = escDeep(job);
   const html = `
     <div class="doc-title"><h1>Inspection / Contingency Agreement</h1></div>
     <div class="section"><div class="section-title">Property Information</div><div class="section-body">
@@ -153,6 +168,8 @@ export function exportContractorAgreement(data, job) {
 }
 
 export function exportInsuranceContract(data, job) {
+  data = escDeep(data);
+  job = escDeep(job);
   const html = `
     <div class="doc-title"><h1>Residential Roofing Contract — Insurance</h1><h2>Contract No. ${data.contractNo || ""}</h2></div>
     <div class="section"><div class="section-title">Owner & Project Information</div><div class="section-body">
@@ -181,6 +198,8 @@ export function exportInsuranceContract(data, job) {
 }
 
 export function exportRetailContract(data, job) {
+  data = escDeep(data);
+  job = escDeep(job);
   const payments = (data.payments || []).filter(p => p.when || p.amount);
   const html = `
     <div class="doc-title"><h1>Residential Roofing Contract — Retail</h1><h2>Contract No. ${data.contractNo || ""}</h2></div>
@@ -214,6 +233,8 @@ export function exportRetailContract(data, job) {
 }
 
 export function exportPreBuildLetter(data, job) {
+  data = escDeep(data);
+  job = escDeep(job);
   const PRECAUTIONS = [
     { id:"p1", title:"Clear the Work Area", body:"Move anything not permanently attached away from the work zone — lawn furniture, hanging or potted plants, grills, hoses, and decorations." },
     { id:"p2", title:"Nails and Cleanup", body:"Construction produces thousands of nails. Mow lawn before construction. Check driveway after dumpster removal. Freedom Exteriors LLC is not liable for missed nails." },
@@ -251,6 +272,8 @@ export function exportPreBuildLetter(data, job) {
 }
 
 export function exportLienNotice(data, job) {
+  data = escDeep(data);
+  job = escDeep(job);
   const html = `
     <div class="doc-title"><h1>Minnesota Mandatory Notice</h1><h2>Per § 514.011 and Housing Statutory Warranty Per § 327A</h2></div>
     <div class="section"><div class="section-title">Project Information</div><div class="section-body">
@@ -277,6 +300,8 @@ export function exportLienNotice(data, job) {
 }
 
 export function exportCancellationNotice(data, job) {
+  data = escDeep(data);
+  job = escDeep(job);
   const noticeText = `If your insurer denies your claim to pay for goods and services to be provided under this contract, you may cancel the contract by mailing or delivering a signed and dated copy of this cancellation notice or any other written notice to:<br/><br/>
     <strong>Freedom Exteriors LLC<br/>1145 Summit Ave<br/>Mahtomedi, MN 55115</strong><br/><br/>
     at any time within 72 hours after you have been notified that your claim has been denied. If you cancel, any payments made by you under the contract will be returned within ten business days following receipt by the contractor of your cancellation notice.`;
@@ -303,6 +328,8 @@ export function exportCancellationNotice(data, job) {
 }
 
 export function exportDocsAcknowledgement(data, job) {
+  data = escDeep(data);
+  job = escDeep(job);
   const docs = [
     "MN Statute 325E.66 — Insurance Deductible Notice",
     "Good Faith Estimate",
@@ -335,6 +362,8 @@ export function exportDocsAcknowledgement(data, job) {
 }
 
 export function exportPurchaseAgreement(data, job) {
+  data = escDeep(data);
+  job = escDeep(job);
   const trade = TRADES[data.trade] || TRADES.roofing;
   const money = v => (v === "" || v === null || v === undefined || isNaN(v)) ? "" : "$" + Number(v).toLocaleString();
 
@@ -398,6 +427,8 @@ export function exportPurchaseAgreement(data, job) {
 }
 
 export function exportCommissionWorkbook(data, job, isParLead) {
+  data = escDeep(data);
+  job = escDeep(job);
   const fmt = n => isNaN(n)||n===0 ? "$0.00" : (n<0?"-$":"$")+Math.abs(n).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
   const gross = parseFloat(data.grossRevenue)||0;
   const opAlloc = gross*0.15;

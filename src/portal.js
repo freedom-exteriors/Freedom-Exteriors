@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { canvasPoint, SIGNATURE_INK } from "./signature";
 import { supabase } from "./supabase";
 import { compressImage, blobToDataUrl } from "./photos";
 
@@ -17,9 +18,17 @@ const STAGES = [
   { id: "collected",  label: "Paid in Full",   icon: "💰" },
 ];
 
+// "2026-10-05" → "Mon, Oct 5, 2026" (dates are stored as plain days, so no time-zone shift).
+function formatDay(d) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d || "");
+  if (!m) return d || "";
+  return new Date(+m[1], +m[2] - 1, +m[3]).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+}
+
 export default function Portal({ token }) {
   const [job, setJob] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [tab, setTab] = useState("status");
   const [message, setMessage] = useState("");
   const [msgSent, setMsgSent] = useState(false);
@@ -34,6 +43,7 @@ export default function Portal({ token }) {
   const [hasDrawn, setHasDrawn] = useState(false);
   const [typedName, setTypedName] = useState("");
   const [sigSaving, setSigSaving] = useState(false);
+  const [sigError, setSigError] = useState(null);
   const lastPos = useRef(null);
 
   useEffect(() => {
@@ -41,6 +51,7 @@ export default function Portal({ token }) {
       // Portal access goes through portal_* RPCs (SECURITY DEFINER), which only
       // touch the job matching this token and only return portal-safe fields.
       const { data, error } = await supabase.rpc("portal_get_job", { p_token: token });
+      if (error) { setLoadFailed(true); setLoading(false); return; }
 
       if (!error && data) {
         let jobData = data;
@@ -49,12 +60,15 @@ export default function Portal({ token }) {
         // before marking the deposit paid.
         const params = new URLSearchParams(window.location.search);
         const sessionId = params.get("session_id");
-        if (params.get("paid") === "true" && sessionId && !jobData.depositPaid) {
+        // Also checked on a normal visit: a homeowner may have paid and closed the
+        // tab before Stripe sent them back.
+        const returning = params.get("paid") === "true" && sessionId;
+        if (!jobData.depositPaid && (returning || jobData.estimate?.downPayment > 0)) {
           try {
             const res = await fetch("/api/confirm-deposit", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ portalToken: token, sessionId }),
+              body: JSON.stringify(returning ? { portalToken: token, sessionId } : { portalToken: token }),
             });
             const out = await res.json();
             if (res.ok && out.job) jobData = out.job;
@@ -95,20 +109,13 @@ export default function Portal({ token }) {
   };
 
   // Canvas drawing helpers
-  const getPos = (e, canvas) => {
-    const rect = canvas.getBoundingClientRect();
-    if (e.touches) {
-      return { x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top };
-    }
-    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
-  };
 
   const startDraw = useCallback((e) => {
     e.preventDefault();
     const canvas = canvasRef.current;
     if (!canvas) return;
     setIsDrawing(true);
-    lastPos.current = getPos(e, canvas);
+    lastPos.current = canvasPoint(e, canvas);
   }, []);
 
   const draw = useCallback((e) => {
@@ -117,11 +124,11 @@ export default function Portal({ token }) {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
-    const pos = getPos(e, canvas);
+    const pos = canvasPoint(e, canvas);
     ctx.beginPath();
     ctx.moveTo(lastPos.current.x, lastPos.current.y);
     ctx.lineTo(pos.x, pos.y);
-    ctx.strokeStyle = TEXT;
+    ctx.strokeStyle = SIGNATURE_INK;
     ctx.lineWidth = 2.5;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
@@ -149,10 +156,12 @@ export default function Portal({ token }) {
     setSigSaving(true);
     const canvas = canvasRef.current;
     const signatureImage = canvas.toDataURL("image/png");
+    setSigError(null);
     const { data: updated, error } = await supabase.rpc("portal_save_signature", {
       p_token: token, p_name: typedName.trim(), p_image: signatureImage,
     });
-    if (!error && updated) setJob(updated);
+    if (!error && updated?.portalSignature) setJob(updated);
+    else setSigError("Your signature didn't save. Check your connection and tap Sign again, or call (651) 283-1689.");
     setSigSaving(false);
   };
 
@@ -211,7 +220,8 @@ export default function Portal({ token }) {
   if (!job) return (
     <div style={{ minHeight:"100vh", background:DARK, display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:10, fontFamily:"'Barlow Condensed',sans-serif", padding:20 }}>
       <div style={{ fontWeight:800, fontSize:28, letterSpacing:4 }}><span style={{ color:TEAL }}>FREEDOM </span><span style={{ color:GOLD }}>EXTERIORS</span></div>
-      <div style={{ color:"#f87171", fontWeight:700, fontSize:14, marginTop:10 }}>Portal link not found or expired.</div>
+      <div style={{ color:"#f87171", fontWeight:700, fontSize:14, marginTop:10 }}>{loadFailed ? "We couldn't load your project — check your connection." : "Portal link not found or expired."}</div>
+      {loadFailed && <button onClick={() => window.location.reload()} style={{ marginTop:8, background:GOLD, color:"#000", border:"none", borderRadius:7, padding:"10px 18px", fontWeight:800, cursor:"pointer", fontFamily:"inherit" }}>Try again</button>}
       <div style={{ color:MUTED, fontSize:12 }}>Please contact us at (651) 283-1689</div>
     </div>
   );
@@ -248,7 +258,7 @@ export default function Portal({ token }) {
                 <div style={{ width:28, height:28, borderRadius:"50%", background:i<=stageIdx?TEAL:BORDER, display:"flex", alignItems:"center", justifyContent:"center", fontSize:12, border:`2px solid ${i===stageIdx?GOLD:i<stageIdx?TEAL:BORDER}` }}>
                   {i < stageIdx ? "✓" : s.icon}
                 </div>
-                <div style={{ fontSize:8, color:i<=stageIdx?TEAL:MUTED, marginTop:3, textAlign:"center", fontWeight:i===stageIdx?800:400, whiteSpace:"nowrap" }}>{s.label}</div>
+                <div style={{ fontSize:8, color:i<=stageIdx?TEAL:MUTED, marginTop:3, textAlign:"center", fontWeight:i===stageIdx?800:400, lineHeight:1.15, maxWidth:56, minHeight:18 }}>{s.label}</div>
               </div>
               {i < STAGES.length-1 && <div style={{ height:2, flex:1, background:i<stageIdx?TEAL:BORDER, marginBottom:14 }}/>}
             </div>
@@ -272,7 +282,7 @@ export default function Portal({ token }) {
           <div>
             <div style={{ fontWeight:700, fontSize:15, marginBottom:12 }}>Your Job Details</div>
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:14 }}>
-              {[["Job Type",job.type],["Assigned Rep",job.assigned],["Insurance",job.insurer],["Claim #",job.claimNum||"Not filed"],["Date Added",job.added],["Install Date",job.installDate||"TBD"]].map(([l,v]) => (
+              {[["Job Type",job.type],["Assigned Rep",job.assigned],["Insurance",job.insurer],["Claim #",job.claimNum||"Not filed"],["Date Added",job.added],["Install Date",formatDay(job.installDate)||"TBD"]].map(([l,v]) => (
                 <div key={l} style={{ background:PANEL, borderRadius:7, padding:"9px 12px", border:`1px solid ${BORDER}` }}>
                   <div style={{ color:MUTED, fontSize:9, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:3 }}>{l}</div>
                   <div style={{ fontWeight:600, fontSize:13 }}>{v||"—"}</div>
@@ -361,7 +371,7 @@ export default function Portal({ token }) {
                   <canvas ref={canvasRef} width={560} height={160}
                     onMouseDown={startDraw} onMouseMove={draw} onMouseUp={stopDraw} onMouseLeave={stopDraw}
                     onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={stopDraw}
-                    style={{ width:"100%", height:160, background:PANEL2, border:`2px solid ${hasDrawn?TEAL:BORDER}`, borderRadius:8, cursor:"crosshair", display:"block", touchAction:"none" }}/>
+                    style={{ width:"100%", height:160, background:"#fff", border:`2px solid ${hasDrawn?TEAL:BORDER}`, borderRadius:8, cursor:"crosshair", display:"block", touchAction:"none" }}/>
                   {!hasDrawn && <div style={{ textAlign:"center", color:BORDER, fontSize:12, marginTop:6 }}>Sign here with your finger or mouse</div>}
                 </div>
                 <div style={{ marginBottom:12 }}>
@@ -376,6 +386,7 @@ export default function Portal({ token }) {
                   style={{ width:"100%", background:typedName.trim()&&hasDrawn?GOLD:"#333", color:typedName.trim()&&hasDrawn?"#000":MUTED, border:"none", borderRadius:8, padding:"13px", fontWeight:800, fontSize:14, cursor:typedName.trim()&&hasDrawn?"pointer":"default", fontFamily:"inherit" }}>
                   {sigSaving ? "Saving…" : "✍️ Sign Contract"}
                 </button>
+                {sigError && <div style={{ color:"#f87171", fontSize:12, marginTop:10 }}>{sigError}</div>}
               </div>
             )}
           </div>

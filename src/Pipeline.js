@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { supabase } from "./supabase";
 import { apiFetch } from "./apiFetch";
 import ContractFill from "./ContractFill";
-import CommissionWorkbook from "./CommissionWorkbook";
+import CommissionWorkbook, { calcCommission } from "./CommissionWorkbook";
 import ContractorAgreement from "./ContractorAgreement";
 import RetailContract from "./RetailContract";
 import PurchaseAgreement from "./PurchaseAgreement";
@@ -758,17 +758,6 @@ export default function Pipeline({ session }) {
 
   const materialsTotal = (mats) => (mats || []).reduce((s, m) => s + m.price * m.qty, 0);
 
-  const calcCommission = (c) => {
-    if (!c) return {};
-    const gross = parseFloat(c.grossRevenue) || 0;
-    const opAlloc = gross * 0.15;
-    const netRev = gross - opAlloc;
-    const costs = [c.xactimate,c.permits,c.roofMaterials,c.roofLabor,c.sidingMaterials,c.sidingLabor,c.gutterMat,c.gutterLabor,c.windows,c.chargeback,c.electrical,c.dumpster,c.materialReturn,c.insNegFee,c.hoverCost,c.other].reduce((s,v) => s + (parseFloat(v)||0), 0);
-    const commNet = netRev - costs;
-    const tierPct = parseFloat(c.tier) || 40;
-    const commission = commNet * (tierPct / 100);
-    return { opAlloc, netRev, costs, commNet, commission };
-  };
 
   const openGoogleCalendar = (job) => {
     const start = job.installDate.replace(/-/g, "");
@@ -831,7 +820,6 @@ export default function Pipeline({ session }) {
     }
   };
 
-  const sf = v => v === undefined ? "" : v;
 
   if (loading) return (
     <div style={{ minHeight:"100vh", background:DARK, display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:14, fontFamily:"'Barlow Condensed',sans-serif" }}>
@@ -1096,36 +1084,25 @@ export default function Pipeline({ session }) {
           <div style={{ display:"grid", gridTemplateColumns:isMobile?"1fr":"1fr 1fr", gap:16 }}>
             {jobs.filter(j => j.estimate?.total > 0 || j.commission?.grossRevenue > 0).map(job => {
               const c = job.commission || {};
-              const calc = calcCommission({ ...c, grossRevenue: c.grossRevenue || job.estimate?.total || 0 });
+              const r = calcCommission({ ...c, grossRevenue: c.grossRevenue || job.estimate?.total || 0 }, !!job.parLead);
+              const final = r.isParLead ? r.repNet : r.commission;
+              const money = v => `$${(Number(v) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
               return (
                 <div key={job.id} style={{ background:PANEL, border:`1px solid ${BORDER}`, borderRadius:10, padding:16 }}>
                   <div style={{ fontWeight:700, fontSize:15, marginBottom:2 }}>{job.name}</div>
-                  <div style={{ color:MUTED, fontSize:12, marginBottom:12 }}>{job.city}, {job.state} · {job.type}</div>
-                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:12 }}>
-                    {[["Gross Revenue","grossRevenue"],["Xactimate","xactimate"],["Permits","permits"],["Roof Materials","roofMaterials"],["Roof Labor","roofLabor"],["Siding Mat.","sidingMaterials"],["Siding Labor","sidingLabor"],["Gutter Mat/Labor","gutterMat"],["Windows","windows"],["Chargeback","chargeback"],["Electrical","electrical"],["Dumpster","dumpster"],["Mat. Return Credit","materialReturn"],["Ins. Neg. Fee","insNegFee"],["Hover Cost","hoverCost"],["Other","other"]].map(([label, key]) => (
-                      <div key={key}>
-                        <label style={{ fontSize:9, color:MUTED, textTransform:"uppercase", letterSpacing:1, display:"block", marginBottom:2 }}>{label}</label>
-                        <input type="number" value={sf(c[key])} onChange={e => updateJob(job.id, { commission: { ...c, [key]: e.target.value } })}
-                          style={{ width:"100%", background:PANEL2, border:`1px solid ${BORDER}`, borderRadius:5, color:TEXT, padding:"5px 8px", fontSize:12, fontFamily:"inherit", boxSizing:"border-box" }} placeholder="0"/>
-                      </div>
-                    ))}
-                  </div>
-                  <div style={{ display:"flex", gap:6, marginBottom:12 }}>
-                    {[30,40,50].map(t => (
-                      <button key={t} onClick={() => updateJob(job.id, { commission: { ...c, tier: t } })} style={{ flex:1, background:c.tier===t?GOLD+"22":"none", border:`1px solid ${c.tier===t?GOLD:BORDER}`, color:c.tier===t?GOLD:MUTED, borderRadius:5, padding:"5px 0", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>{t}%</button>
-                    ))}
-                  </div>
+                  <div style={{ color:MUTED, fontSize:12, marginBottom:12 }}>{job.city}, {job.state} · {job.type}{c.grossRevenue ? "" : " · using estimate total"}</div>
                   <div style={{ background:PANEL2, borderRadius:8, padding:12 }}>
-                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:4 }}>
-                      {[["Op. Alloc (15%)", calc.opAlloc],["Net Revenue", calc.netRev],["Total Costs", calc.costs],["Comm. Net", calc.commNet]].map(([label, val]) => (
-                        <div key={label}><div style={{ fontSize:9, color:MUTED, textTransform:"uppercase" }}>{label}</div><div style={{ fontSize:13, fontWeight:600 }}>${(val||0).toFixed(2)}</div></div>
+                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
+                      {[["Gross Revenue", r.gross],["Op. Alloc (15%)", r.opAlloc],["Total Costs", r.costs],["Comm. Net", r.commNet], ...(r.isParLead ? [["PAR Fee (10.5%)", r.parFee]] : [])].map(([label, val]) => (
+                        <div key={label}><div style={{ fontSize:9, color:MUTED, textTransform:"uppercase" }}>{label}</div><div style={{ fontSize:13, fontWeight:600, color: val < 0 ? "#f87171" : TEXT }}>{money(val)}</div></div>
                       ))}
                     </div>
                     <div style={{ marginTop:10, borderTop:`1px solid ${BORDER}`, paddingTop:10, textAlign:"center" }}>
-                      <div style={{ fontSize:10, color:MUTED, textTransform:"uppercase" }}>Commission ({c.tier||40}%)</div>
-                      <div style={{ fontSize:26, fontWeight:800, color:GOLD }}>${(calc.commission||0).toFixed(2)}</div>
+                      <div style={{ fontSize:10, color:MUTED, textTransform:"uppercase" }}>{r.isParLead ? "Rep Commission after PAR" : "Commission"} ({r.tier}% tier)</div>
+                      <div style={{ fontSize:26, fontWeight:800, color: final < 0 ? "#f87171" : GOLD }}>{money(final)}</div>
                     </div>
                   </div>
+                  <button onClick={() => { setSelected(job); setCommissionOpen(true); }} style={{ width:"100%", marginTop:10, background:GREEN+"22", border:`1px solid ${GREEN}`, color:GREEN, borderRadius:7, padding:"9px", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>Open Commission Workbook</button>
                 </div>
               );
             })}

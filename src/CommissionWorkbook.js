@@ -36,7 +36,8 @@ const COST_LINES = [
   { key: "other",          label: "S. Other" },
 ];
 
-function calc(c, isParLead) {
+// Shared with the job board's commission overview so both always agree.
+export function calcCommission(c, isParLead) {
   const gross = parseFloat(c?.grossRevenue) || 0;
   const opAlloc = gross * OP_ALLOC_PCT;
   const netRev = gross - opAlloc;
@@ -133,7 +134,7 @@ export default function CommissionWorkbook({ job, isAdmin, onSave, onClose }) {
     setTimeout(() => setSavedFlash(false), 1800);
   };
 
-  const r = calc(local, parActive);
+  const r = calcCommission(local, parActive);
   const finalCommission = r.isParLead ? r.repNet : r.commission;
   const repSplitPctTotal = repSplits.reduce((sum, row) => sum + (parseFloat(row.pct) || 0), 0);
 

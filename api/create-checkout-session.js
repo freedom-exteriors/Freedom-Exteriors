@@ -14,7 +14,7 @@ export default async function handler(req, res) {
   const amount = Number(job.estimate?.downPayment);
   if (!(amount > 0)) return res.status(400).json({ error: "No deposit amount set for this project" });
 
-  const origin = `https://${req.headers["x-forwarded-host"] || req.headers.host}`;
+  const origin = (process.env.APP_ORIGIN || "https://freedom-exteriors.vercel.app").replace(/\/$/, "");
   const portalUrl = `${origin}/portal/${encodeURIComponent(portalToken)}`;
   try {
     const session = await stripeRequest("POST", "checkout/sessions", {
@@ -35,6 +35,8 @@ export default async function handler(req, res) {
       cancel_url: portalUrl,
       metadata: { portalToken, customerName: job.name || "" },
     });
+    // Remembered so the payment is recorded even if the homeowner never comes back to the portal.
+    await supabaseAdmin().rpc("portal_set_pending_deposit", { p_token: portalToken, p_session_id: session.id });
     return res.status(200).json({ url: session.url });
   } catch (e) {
     console.error("Stripe error:", e.message);
