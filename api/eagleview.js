@@ -145,6 +145,8 @@ async function quoteOrOrder(req, res, action) {
 
   if (action === "quote") {
     const resp = await priceOrder(body);
+    // Logged so the price field can be confirmed against a real response (prices/product names only).
+    console.log("eagleview PriceOrder response:", JSON.stringify(resp).slice(0, 2000));
     return res.status(200).json({ env, price: quotedPrice(resp), address: Object.values(address).join(", "), product: product.name });
   }
 

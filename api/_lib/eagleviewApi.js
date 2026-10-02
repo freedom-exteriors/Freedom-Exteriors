@@ -115,18 +115,22 @@ export async function getReportFile(reportId, fileFormat, fileType) {
   return Buffer.from(await res.arrayBuffer());
 }
 
-// PriceOrder's response shape isn't documented; pick out the total.
+// PriceOrder's response shape isn't documented. Prefer an explicit total;
+// otherwise the first price-like number anywhere in the response.
 export function quotedPrice(resp) {
-  let found = null;
-  const walk = (o) => {
-    if (found !== null || !o || typeof o !== "object") return;
+  const hits = [];
+  const walk = (o, depth = 0) => {
+    if (!o || typeof o !== "object" || depth > 6) return;
     for (const [k, v] of Object.entries(o)) {
-      if (typeof v === "number" && /^(total|totalprice|totalcost|price|amount|ordertotal)$/i.test(k)) { found = v; return; }
+      const n = typeof v === "number" ? v : typeof v === "string" && /^\$?\d+(\.\d+)?$/.test(v.trim()) ? parseFloat(v.replace("$", "")) : null;
+      if (n !== null && Number.isFinite(n) && /(price|cost|total|amount|charge|fee)/i.test(k) && !/(id|count|qty|quantity)$/i.test(k)) {
+        hits.push({ n, total: /total|ordertotal|grand/i.test(k), depth });
+      } else if (v && typeof v === "object") walk(v, depth + 1);
     }
-    for (const v of Object.values(o)) walk(v);
   };
   walk(resp);
-  return found;
+  const pick = hits.find((h) => h.total) || hits.sort((a, b) => a.depth - b.depth)[0];
+  return pick ? pick.n : null;
 }
 
 // ---------- Measurements ----------

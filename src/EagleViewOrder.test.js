@@ -24,7 +24,6 @@ beforeEach(() => {
   rows = [];
   jobData = {};
   supabase.from.mockImplementation(table);
-  window.confirm = jest.fn(() => true);
 });
 
 test("quotes, confirms and places an order, saving the ZIP on the job", async () => {
@@ -42,23 +41,25 @@ test("quotes, confirms and places an order, saving the ZIP on the job", async ()
   expect(sent(0)).toEqual(["/api/eagleview?action=quote", { jobId: 7, productId: 110, zip: "55113" }]);
 
   fireEvent.click(screen.getByText("Place order · $18.00"));
+  expect(screen.getByText("Sandbox test order (no charge)")).toBeInTheDocument();
+  expect(apiFetch).toHaveBeenCalledTimes(1); // nothing ordered until confirmed
+  fireEvent.click(screen.getByText("Confirm order"));
   await waitFor(() => expect(onPatch).toHaveBeenCalledWith({ zip: "55113" }));
-  expect(window.confirm.mock.calls[0][0]).toMatch(/SANDBOX test order/);
   expect(sent(1)).toEqual(["/api/eagleview?action=order", { jobId: 7, productId: 110, zip: "55113", confirm: true }]);
   expect(screen.getByText(/report #52191405/)).toBeInTheDocument();
   // An order is in progress, so a second one can't be started.
   expect(screen.getByText(/Order EagleView report/).closest("button")).toBeDisabled();
 });
 
-test("nothing is ordered when the confirmation is declined", async () => {
-  window.confirm = jest.fn(() => false);
+test("a real order says so and can be backed out of", async () => {
   apiFetch.mockReturnValueOnce(reply({ env: "production", price: null, product: "Roof (full measurements)", address: "2113 Alameda St, Saint Paul, Minnesota, 55113" }));
   render(<EagleViewOrder job={{ ...JOB, zip: "55113" }} onPatch={jest.fn()} />);
   fireEvent.click(screen.getByText(/Order EagleView report/));
   fireEvent.click(screen.getByText("Get price"));
   fireEvent.click(await screen.findByText("Place order"));
-  await waitFor(() => expect(screen.getByText("Place order")).toBeEnabled());
-  expect(window.confirm.mock.calls[0][0]).toMatch(/REAL EagleView order[\s\S]*not quoted/);
+  expect(screen.getByText("Place a real EagleView order at your EagleView rate?")).toBeInTheDocument();
+  fireEvent.click(screen.getByText("Back"));
+  expect(screen.queryByText("Confirm order")).not.toBeInTheDocument();
   expect(apiFetch).toHaveBeenCalledTimes(1);
 });
 
