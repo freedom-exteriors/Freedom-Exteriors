@@ -119,6 +119,8 @@ export function normalizeEagleView(x, { now = new Date() } = {}) {
     roofs: roofs.map((r) => ({ label: r.label || null, squares: n(r.squares), facets: n(r.facets), suggestedWastePct: n(r.suggestedWastePct), pitches: (r.pitches || []).map((p) => ({ pitch: p.pitch, percent: n(p.percent), squares: n(p.squares) })) })),
     hasLengths,
     ridgeHipLength: ridges !== null || hips !== null ? (ridges || 0) + (hips || 0) : null,
+    ridgeLength: ridges,
+    hipLength: hips,
     valleyLength: n(L.valleys),
     eavesLength: eaves,
     rakeLength: rakes,
