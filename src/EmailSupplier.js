@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { apiFetch } from "./apiFetch";
+import { roofMeasurements } from "./measurements";
 
 const TEAL = "#1a9e99"; const GOLD = "#e8a820";
 const PANEL = "#0f1923"; const PANEL2 = "#162030"; const BORDER = "#1e3048";
@@ -20,7 +21,8 @@ export default function EmailSupplier({ job, contact, onSaveContact, onSent }) {
   const [cc, setCc] = useState("");
   const [subject, setSubject] = useState("");
   const [message, setMessage] = useState("");
-  const [withMeasurements, setWithMeasurements] = useState(Boolean(job.hoverMeasurements?.totalRoofArea));
+  const measured = roofMeasurements(job);
+  const [withMeasurements, setWithMeasurements] = useState(Boolean(measured));
   const [remember, setRemember] = useState(false);
   const [sending, setSending] = useState(false);
   const [status, setStatus] = useState(null);
@@ -41,7 +43,7 @@ export default function EmailSupplier({ job, contact, onSaveContact, onSent }) {
           to, cc, subject, message,
           job: { address: job.address, city: job.city, state: job.state, zip: job.zip, type: job.type },
           materials: materials.map(m => ({ name: m.name, cat: m.cat, unit: m.unit, qty: m.qty })),
-          measurements: withMeasurements ? job.hoverMeasurements : null,
+          measurements: withMeasurements ? measured : null,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -80,9 +82,9 @@ export default function EmailSupplier({ job, contact, onSaveContact, onSent }) {
           <div style={{ fontSize: 12, color: MUTED, marginBottom: 6 }}>
             {materials.length} item{materials.length === 1 ? "" : "s"} (quantities only, no prices) + spreadsheet attachment
           </div>
-          {job.hoverMeasurements?.totalRoofArea ? (
+          {measured ? (
             <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginBottom: 6, cursor: "pointer" }}>
-              <input type="checkbox" checked={withMeasurements} onChange={e => setWithMeasurements(e.target.checked)} /> Include Hover roof measurements
+              <input type="checkbox" checked={withMeasurements} onChange={e => setWithMeasurements(e.target.checked)} /> Include roof measurements ({measured.source === "eagleview" ? "EagleView" : "Hover"})
             </label>
           ) : null}
           {to.trim() && to.trim() !== saved.email && (

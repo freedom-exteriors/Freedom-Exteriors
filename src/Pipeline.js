@@ -12,6 +12,8 @@ import CancellationNotice from "./CancellationNotice";
 import DocsAcknowledgement from "./DocsAcknowledgement";
 import GoodBetterBest, { PricingSettings, MaterialsCatalogSettings, DEFAULT_PRICING } from "./GoodBetterBest";
 import EmailSupplier from "./EmailSupplier";
+import EagleViewImport from "./EagleViewImport";
+import { roofMeasurements } from "./measurements";
 import QuickQuote from "./QuickQuote";
 import ScopeReview from "./ScopeReview";
 import { compressImage, uploadJobPhoto, usePhotoUrls, deleteJobPhotoFiles, movePhotosToStorage } from "./photos";
@@ -1247,6 +1249,7 @@ export default function Pipeline({ session }) {
                     {selected.hoverId && <button onClick={() => fetchHoverMeasurements(selected)} style={{ background:"#ff6b2222", border:"1px solid #ff6b22", color:"#ff6b22", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>📐 Fetch Measurements</button>}
                     {isAdmin && <button onClick={() => removeJob(selected.id)} style={{ background:"#7c2d1222", border:"1px solid #7c2d12", color:"#f87171", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13 }}>🗑️ Delete</button>}
                   </div>
+                  <EagleViewImport key={selected.id} job={selected} onImported={m => updateJob(selected.id, { eagleviewMeasurements: m })} />
                 </div>
               )}
 
@@ -1361,7 +1364,7 @@ export default function Pipeline({ session }) {
                       </div>
                     </div>
                   )}
-                  {((selected.materials||[]).length > 0 || selected.hoverMeasurements?.totalRoofArea || (selected.supplierEmails||[]).length > 0) && (
+                  {((selected.materials||[]).length > 0 || roofMeasurements(selected) || (selected.supplierEmails||[]).length > 0) && (
                     <EmailSupplier
                       key={selected.id}
                       job={selected}
