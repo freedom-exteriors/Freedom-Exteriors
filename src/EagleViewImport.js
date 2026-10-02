@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { apiFetch } from "./apiFetch";
 import { supabase } from "./supabase";
+import EagleViewOrder from "./EagleViewOrder";
 
 const PANEL2 = "#162030"; const BORDER = "#1e3048"; const TEXT = "#e2eaf4"; const MUTED = "#6b8099";
 const EV = "#3b82f6"; const WARN = "#fbbf24";
@@ -8,9 +9,9 @@ const BUCKET = "measurement-reports";
 
 const lf = (v) => (v || v === 0 ? `${Number(v).toLocaleString()} LF` : "—");
 
-// Upload an EagleView report PDF for this job; the server reads it into
-// measurements (same shape as Hover's) that get saved as eagleviewMeasurements.
-export default function EagleViewImport({ job, onImported }) {
+// Upload an EagleView report PDF for this job, or order one; either way the
+// measurements (same shape as Hover's) get saved as eagleviewMeasurements.
+export default function EagleViewImport({ job, onImported, onPatch }) {
   const fileRef = useRef(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -59,6 +60,7 @@ export default function EagleViewImport({ job, onImported }) {
       ["Eaves / rakes", `${lf(m.eavesLength)} / ${lf(m.rakeLength)}`], ["Drip edge", lf(m.dripEdgeLength)],
       ["Step flashing", lf(m.stepFlashingLength)],
     ] : []),
+    ...(m.walls?.wallsArea ? [["Wall area", `${m.walls.wallsArea.toLocaleString()} sq ft (siding ${(m.walls.sidingArea || 0).toLocaleString()})`]] : []),
   ] : [];
 
   return (
@@ -68,6 +70,7 @@ export default function EagleViewImport({ job, onImported }) {
         {busy ? "Reading EagleView report…" : m ? "🦅 Replace EagleView report" : "🦅 Import EagleView report"}
       </button>
       {error && <div style={{ color: "#f87171", fontSize: 12, marginTop: 6 }}>{error}</div>}
+      {onPatch && <EagleViewOrder job={job} onPatch={onPatch} />}
       {m && (
         <div style={{ background: PANEL2, border: `1px solid ${BORDER}`, borderRadius: 8, padding: 12, marginTop: 10 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8, gap: 8, flexWrap: "wrap" }}>
