@@ -1,6 +1,11 @@
 import { roofMeasurements } from "./measurements";
 import { useState } from "react";
 import { apiFetch } from "./apiFetch";
+import { abcSupplyGetPricing, abcSupplySearchItems } from "./abcSupply";
+import {
+  LENGTH_BASES, accessoryLine, pitchMix, measuredPitch, measuredStories, weightedPitchPct, bandPct,
+  tierMaterialCost, abcPricingLines, applyAbcPrices, shingleName,
+} from "./gbbMaterials";
 
 const TEAL = "#1a9e99"; const GOLD = "#e8a820"; const DARK = "#080d14";
 const PANEL = "#0f1923"; const PANEL2 = "#162030"; const BORDER = "#1e3048";
@@ -28,6 +33,9 @@ const DEFAULT_PRICING = {
     { stories: 3, label: "3+ Story", pct: 25 },
   ],
   wasteFactorPct: 10, // % added to measured area for cuts/waste
+  // ABC Supply account the materials catalog is priced against (internal cost only).
+  abcShipTo: "2263174-2",
+  abcBranch: "354",
 };
 
 function Field({ label, value, onChange, prefix, suffix }) {
@@ -46,6 +54,16 @@ function Field({ label, value, onChange, prefix, suffix }) {
   );
 }
 
+function TextField({ label, value, onChange }) {
+  return (
+    <div>
+      <label style={{ display: "block", fontSize: 10, fontWeight: 700, color: MUTED, textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 }}>{label}</label>
+      <input type="text" value={value} onChange={e => onChange(e.target.value.trim())}
+        style={{ width: "100%", background: PANEL2, border: `1px solid ${BORDER}`, borderRadius: 7, color: TEXT, padding: "10px", fontSize: 15, fontFamily: "monospace", boxSizing: "border-box" }} />
+    </div>
+  );
+}
+
 function fmt(n) {
   return "$" + Math.round(n).toLocaleString();
 }
@@ -59,19 +77,109 @@ export function catalogItemLabel(item) {
 }
 
 // Accessory quantity + cost, given total squares and this job's selections.
-// calcMode "auto": quantity = ceil(squares / coveragePerUnit). "manual": quantity is typed in per job.
-export function calcAccessoryLine(item, squares, manualQty) {
-  const qty = item.calcMode === "manual"
-    ? (parseFloat(manualQty) || 0)
-    : Math.ceil((parseFloat(squares) || 0) / (parseFloat(item.coveragePerUnit) || 1));
-  const price = parseFloat(item.pricePerUnit) || 0;
-  return { qty, total: qty * price };
+// calcMode "auto": ceil(squares / coveragePerUnit). "length": ceil(measured LF / coveragePerUnit).
+// "manual": quantity is typed in per job. See accessoryLine in gbbMaterials.js.
+export function calcAccessoryLine(item, squares, manualQty, measurements) {
+  return accessoryLine(item, squares, manualQty, measurements);
+}
+
+// ABC item link for one catalog row: item number + unit (+ units per square
+// for shingles), a catalog search, and the last refreshed cost.
+function AbcLink({ item, update, branch, shingle, searching, onSearch }) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const small = { background: PANEL2, border: `1px solid ${BORDER}`, borderRadius: 6, color: TEXT, padding: "6px 8px", fontSize: 12, fontFamily: "monospace", boxSizing: "border-box" };
+
+  const search = async () => {
+    if (!query.trim()) return;
+    setBusy(true); setError(null);
+    try { setResults((await abcSupplySearchItems(query.trim(), { branchNumber: branch })).items || []); }
+    catch (e) { setError(e.message); }
+    setBusy(false);
+  };
+  const pick = (r, uom) => {
+    update(item.id, "abcItemNumber", r.itemNumber);
+    update(item.id, "abcUom", uom || "");
+    update(item.id, "abcDescription", r.description || "");
+    update(item.id, "abcCost", null);
+    update(item.id, "abcStatus", "Refresh to get cost");
+    // Shingles are sold by the square or by the bundle (3 per square).
+    if (shingle && !item.abcUnitsPerSq && (uom === "BD" || uom === "SQ")) update(item.id, "abcUnitsPerSq", uom === "BD" ? "3" : "1");
+    onSearch(null); setResults(null);
+  };
+
+  return (
+    <div style={{ flexBasis: "100%", display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", fontSize: 11, color: MUTED }}>
+      <span>ABC #</span>
+      <input aria-label="ABC item number" value={item.abcItemNumber || ""} onChange={e => update(item.id, "abcItemNumber", e.target.value.trim())} placeholder="item #" style={{ ...small, width: 110 }} />
+      <input aria-label="ABC unit" value={item.abcUom || ""} onChange={e => update(item.id, "abcUom", e.target.value.trim().toUpperCase())} placeholder="UOM" style={{ ...small, width: 56 }} />
+      {shingle && <>
+        <input aria-label="Units per square" type="number" min="0" step="0.01" value={item.abcUnitsPerSq ?? ""} onChange={e => update(item.id, "abcUnitsPerSq", e.target.value)} placeholder="1" style={{ ...small, width: 56 }} />
+        <span>{item.abcUom || "units"}/sq</span>
+      </>}
+      <button onClick={() => onSearch(searching ? null : item.id)} style={{ background: "none", border: `1px solid ${BORDER}`, color: TEAL, borderRadius: 6, padding: "5px 8px", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>🔍 Find</button>
+      {item.abcItemNumber && (
+        <span style={{ color: item.abcStatus === "OK" ? TEXT : GOLD }}>
+          🔒 {item.abcCost != null ? `$${Number(item.abcCost).toFixed(2)}/${item.abcUom || "unit"}` : item.abcStatus || "not priced yet"}
+          {item.abcCostAt ? ` · ${new Date(item.abcCostAt).toLocaleDateString("en-US")}` : ""}
+        </span>
+      )}
+      {searching && (
+        <div style={{ flexBasis: "100%", background: PANEL2, border: `1px solid ${BORDER}`, borderRadius: 7, padding: 8, marginTop: 4 }}>
+          <div style={{ display: "flex", gap: 6 }}>
+            <input aria-label="Search ABC catalog" autoFocus value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => e.key === "Enter" && search()}
+              placeholder={`Search ABC at branch ${branch} (e.g. Timberline HDZ Charcoal)`} style={{ ...small, flex: 1, fontFamily: "inherit" }} />
+            <button onClick={search} disabled={busy} style={{ background: `${TEAL}22`, border: `1px solid ${TEAL}`, color: TEAL, borderRadius: 6, padding: "5px 10px", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>{busy ? "…" : "Search"}</button>
+          </div>
+          {error && <div style={{ color: "#f87171", marginTop: 6 }}>{error}</div>}
+          {results && !results.length && <div style={{ marginTop: 6 }}>No matches at this branch.</div>}
+          <div style={{ maxHeight: 220, overflowY: "auto", marginTop: 6 }}>
+            {(results || []).map(r => (
+              <div key={r.itemNumber} style={{ display: "flex", gap: 6, alignItems: "center", padding: "4px 0", borderTop: `1px solid ${BORDER}`, color: TEXT }}>
+                <span style={{ fontFamily: "monospace", color: MUTED, width: 96 }}>{r.itemNumber}</span>
+                <span style={{ flex: 1 }}>{r.description}</span>
+                {(r.uoms?.length ? r.uoms : [{ code: "" }]).map(u => (
+                  <button key={u.code} onClick={() => pick(r, u.code)} title={u.name || ""} style={{ background: "none", border: `1px solid ${TEAL}`, color: TEAL, borderRadius: 5, padding: "2px 6px", fontSize: 10, cursor: "pointer", fontFamily: "inherit" }}>Use{u.code ? ` · ${u.code}` : ""}</button>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ─── Materials Catalog (admin configures once, feeds Good/Better/Best) ──────
-export function MaterialsCatalogSettings({ catalog, onSave, onClose }) {
+export function MaterialsCatalogSettings({ catalog, pricing, onSave, onClose }) {
   const [local, setLocal] = useState(catalog && catalog.length ? catalog : []);
   const [savedFlash, setSavedFlash] = useState(false);
+  const [abcBusy, setAbcBusy] = useState(false);
+  const [abcMsg, setAbcMsg] = useState(null);
+  const [searchFor, setSearchFor] = useState(null); // catalog item id being linked
+  const shipTo = (pricing || DEFAULT_PRICING).abcShipTo || DEFAULT_PRICING.abcShipTo;
+  const branch = (pricing || DEFAULT_PRICING).abcBranch || DEFAULT_PRICING.abcBranch;
+
+  // Pull current ABC costs for every linked item and save them on the catalog.
+  const refreshAbc = async () => {
+    const lines = abcPricingLines(local);
+    if (!lines.length) { setAbcMsg({ error: true, text: "Link at least one item to an ABC item number first." }); return; }
+    setAbcBusy(true);
+    setAbcMsg(null);
+    try {
+      const { prices, fetchedAt, env } = await abcSupplyGetPricing(shipTo, branch, lines);
+      const next = applyAbcPrices(local, prices, fetchedAt);
+      setLocal(next);
+      onSave(next);
+      const priced = next.filter(i => i.abcItemNumber && i.abcStatus === "OK").length;
+      setAbcMsg({ text: `Updated ${priced} of ${next.filter(i => i.abcItemNumber).length} linked items from ABC branch ${branch}${env === "sandbox" ? " (SANDBOX prices)" : ""}. Saved.` });
+    } catch (e) {
+      setAbcMsg({ error: true, text: e.message });
+    }
+    setAbcBusy(false);
+  };
 
   const save = () => { onSave(local); setSavedFlash(true); setTimeout(() => setSavedFlash(false), 1800); };
   const addShingle = () => setLocal(items => [...items, { id: Date.now() + Math.random(), itemType: "shingle", manufacturer: "", style: "", color: "", ratePerSq: "" }]);
@@ -98,12 +206,24 @@ export function MaterialsCatalogSettings({ catalog, onSave, onClose }) {
 
       <div style={{ maxWidth: 720, margin: "0 auto", padding: 18 }}>
         <div style={{ fontSize: 12, color: MUTED, marginBottom: 16, lineHeight: 1.6 }}>
-          Shingle products feed the Good/Better/Best tier dropdowns — pick one instead of the flat default rate, and the surcharge math (pitch, story, waste) still applies exactly like it does today. Accessories (tear-off materials) are calculated from the roof's squares and added equally to all three tiers.
+          Shingle products feed the Good/Better/Best tier dropdowns — pick one instead of the flat default rate, and the surcharge math (pitch, story, waste) still applies exactly like it does today. Accessories (tear-off materials) are calculated from the roof's squares or measured lengths and added equally to all three tiers.
+        </div>
+
+        <div style={{ background: PANEL, border: `1px solid ${BORDER}`, borderRadius: 9, padding: 12, marginBottom: 20 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 12, color: TEXT }}>
+              <b>🔒 ABC Supply costs</b> <span style={{ color: MUTED }}>— ship-to {shipTo}, branch {branch}. Internal only: shown to staff as material cost/margin, never on customer prices.</span>
+            </div>
+            <button onClick={refreshAbc} disabled={abcBusy} style={{ background: `${GOLD}22`, border: `1px solid ${GOLD}`, color: GOLD, borderRadius: 7, padding: "8px 14px", fontWeight: 700, fontSize: 12, cursor: abcBusy ? "wait" : "pointer", fontFamily: "inherit" }}>
+              {abcBusy ? "Refreshing…" : "⟳ Refresh ABC costs"}
+            </button>
+          </div>
+          {abcMsg && <div style={{ fontSize: 12, marginTop: 8, color: abcMsg.error ? "#f87171" : TEAL }}>{abcMsg.text}</div>}
         </div>
 
         <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 800, fontSize: 13, color: GOLD, textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>Shingle Products (feed Good/Better/Best)</div>
         {shingles.map(item => (
-          <div key={item.id} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, background: PANEL, border: `1px solid ${BORDER}`, borderRadius: 9, padding: 10 }}>
+          <div key={item.id} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, background: PANEL, border: `1px solid ${BORDER}`, borderRadius: 9, padding: 10, flexWrap: "wrap" }}>
             <input type="text" placeholder="Manufacturer (e.g. GAF)" value={item.manufacturer}
               onChange={e => updateItem(item.id, "manufacturer", e.target.value)}
               style={{ flex: 1.2, background: PANEL2, border: `1px solid ${BORDER}`, borderRadius: 7, color: TEXT, padding: "9px 10px", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box" }}/>
@@ -121,6 +241,7 @@ export function MaterialsCatalogSettings({ catalog, onSave, onClose }) {
             </div>
             <span style={{ color: MUTED, fontSize: 11 }}>/sq</span>
             <button onClick={() => removeItem(item.id)} style={{ background: "none", border: "none", color: "#f87171", cursor: "pointer", fontSize: 16, padding: "0 4px" }}>✕</button>
+            <AbcLink item={item} update={updateItem} branch={branch} shingle searching={searchFor === item.id} onSearch={setSearchFor} />
           </div>
         ))}
         {shingles.length === 0 && <div style={{ textAlign: "center", color: MUTED, padding: "14px 0", fontSize: 12 }}>No shingle products yet.</div>}
@@ -128,7 +249,7 @@ export function MaterialsCatalogSettings({ catalog, onSave, onClose }) {
 
         <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 800, fontSize: 13, color: GOLD, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>Accessories (ice & water, felt, vents, drip edge, nails, etc.)</div>
         <div style={{ fontSize: 11, color: MUTED, marginBottom: 10, lineHeight: 1.5 }}>
-          "Auto" calculates quantity from roof squares using the coverage rate you enter (e.g. 1 roll covers 4 squares). "Manual" lets you type the quantity per job — use this for anything code-driven like vent counts.
+          "Per sq" calculates quantity from roof squares using the coverage you enter (e.g. 1 roll covers 4 squares). "By length" uses the measured ridge/eave/rake/valley feet from Hover or EagleView (e.g. a bundle of ridge cap covers 25 LF; enter a little less than the nominal coverage to allow for overlap and waste) — on jobs without measured lengths you type the quantity. "Manual" is typed per job — use it for code-driven items like vent counts.
         </div>
         {accessories.map(item => (
           <div key={item.id} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, background: PANEL, border: `1px solid ${BORDER}`, borderRadius: 9, padding: 10, flexWrap: "wrap" }}>
@@ -147,9 +268,24 @@ export function MaterialsCatalogSettings({ catalog, onSave, onClose }) {
             <span style={{ color: MUTED, fontSize: 11 }}>/unit</span>
             <select value={item.calcMode} onChange={e => updateItem(item.id, "calcMode", e.target.value)}
               style={{ flex: 1, minWidth: 100, background: PANEL2, border: `1px solid ${BORDER}`, borderRadius: 7, color: TEXT, padding: "9px 6px", fontSize: 12, fontFamily: "inherit" }}>
-              <option value="auto">Auto (per sq)</option>
+              <option value="auto">Per sq</option>
+              <option value="length">By length</option>
               <option value="manual">Manual qty</option>
             </select>
+            {item.calcMode === "length" && (
+              <>
+                <select aria-label="Measured from" value={item.lengthBasis || "ridgeHip"} onChange={e => updateItem(item.id, "lengthBasis", e.target.value)}
+                  style={{ flex: 1.4, minWidth: 150, background: PANEL2, border: `1px solid ${BORDER}`, borderRadius: 7, color: TEXT, padding: "9px 6px", fontSize: 12, fontFamily: "inherit" }}>
+                  {Object.entries(LENGTH_BASES).map(([k, b]) => <option key={k} value={k}>{b.label}</option>)}
+                </select>
+                <div style={{ position: "relative", flex: 0.8, minWidth: 70 }}>
+                  <input type="number" min="0" step="0.01" placeholder="0" value={item.coveragePerUnit}
+                    onChange={e => updateItem(item.id, "coveragePerUnit", e.target.value)}
+                    style={{ width: "100%", background: PANEL2, border: `1px solid ${BORDER}`, borderRadius: 7, color: TEXT, padding: "9px 10px", fontSize: 13, fontFamily: "monospace", boxSizing: "border-box" }}/>
+                </div>
+                <span style={{ color: MUTED, fontSize: 11 }}>LF/unit</span>
+              </>
+            )}
             {item.calcMode === "auto" && (
               <>
                 <div style={{ position: "relative", flex: 0.8, minWidth: 70 }}>
@@ -161,6 +297,7 @@ export function MaterialsCatalogSettings({ catalog, onSave, onClose }) {
               </>
             )}
             <button onClick={() => removeItem(item.id)} style={{ background: "none", border: "none", color: "#f87171", cursor: "pointer", fontSize: 16, padding: "0 4px" }}>✕</button>
+            <AbcLink item={item} update={updateItem} branch={branch} searching={searchFor === item.id} onSearch={setSearchFor} />
           </div>
         ))}
         {accessories.length === 0 && <div style={{ textAlign: "center", color: MUTED, padding: "14px 0", fontSize: 12 }}>No accessories yet.</div>}
@@ -238,6 +375,15 @@ export function PricingSettings({ pricing, onSave, onClose }) {
           </div>
         </div>
 
+        <div style={{ background: PANEL, border: `1px solid ${BORDER}`, borderRadius: 10, padding: 18, marginBottom: 16 }}>
+          <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 800, fontSize: 14, color: GOLD, marginBottom: 4, textTransform: "uppercase", letterSpacing: 1 }}>ABC Supply Account</div>
+          <div style={{ fontSize: 11, color: MUTED, marginBottom: 14 }}>Where the materials catalog's ABC costs come from. Your shop is ship-to 2263174-2, home branch 354 (Savage).</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, maxWidth: 360 }}>
+            <TextField label="Ship-to #" value={local.abcShipTo ?? DEFAULT_PRICING.abcShipTo} onChange={v => setLocal(d => ({ ...d, abcShipTo: v }))} />
+            <TextField label="Branch #" value={local.abcBranch ?? DEFAULT_PRICING.abcBranch} onChange={v => setLocal(d => ({ ...d, abcBranch: v }))} />
+          </div>
+        </div>
+
         <div style={{ textAlign: "center", paddingBottom: 30 }}>
           <button onClick={save} style={{ background: `${TEAL}22`, border: `1px solid ${TEAL}`, color: TEAL, borderRadius: 8, padding: "14px 28px", fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}>💾 Save Pricing Settings</button>
         </div>
@@ -247,11 +393,7 @@ export function PricingSettings({ pricing, onSave, onClose }) {
 }
 
 // ─── Pricing calc ────────────────────────────────────────────────────────────
-function pitchSurchargePct(pitch, bands) {
-  const p = parseFloat(pitch) || 0;
-  const band = bands.find(b => p <= b.maxPitch) || bands[bands.length - 1];
-  return band ? parseFloat(band.pct) || 0 : 0;
-}
+const pitchSurchargePct = bandPct;
 function storySurchargePct(stories, bands) {
   const s = parseInt(stories) || 1;
   const exact = bands.find(b => b.stories === s);
@@ -260,12 +402,17 @@ function storySurchargePct(stories, bands) {
   return capped ? parseFloat(capped.pct) || 0 : 0;
 }
 
-export function calcGoodBetterBest({ sqFt, pitch, stories, pricing, baseOverrides }) {
+// wastePct: this job's waste % (defaults to the pricing setting).
+// pitchMix: [{ rise, area }] from measurements — when given, the pitch surcharge
+// is weighted by how much of the roof is at each pitch instead of using `pitch`.
+export function calcGoodBetterBest({ sqFt, pitch, stories, pricing, baseOverrides, wastePct, pitchMix: mix }) {
   const p = pricing || DEFAULT_PRICING;
   const area = parseFloat(sqFt) || 0;
-  const withWaste = area * (1 + (parseFloat(p.wasteFactorPct) || 0) / 100);
+  const waste = Number.isFinite(parseFloat(wastePct)) ? parseFloat(wastePct) : (parseFloat(p.wasteFactorPct) || 0);
+  const withWaste = area * (1 + waste / 100);
   const squares = withWaste / 100;
-  const pitchPct = pitchSurchargePct(pitch, p.pitchBands);
+  const weighted = mix?.length ? weightedPitchPct(mix, p.pitchBands) : null;
+  const pitchPct = weighted ?? pitchSurchargePct(pitch, p.pitchBands);
   const storyPct = storySurchargePct(stories, p.storyBands);
   const totalMultiplier = 1 + (pitchPct + storyPct) / 100;
 
@@ -278,7 +425,7 @@ export function calcGoodBetterBest({ sqFt, pitch, stories, pricing, baseOverride
   const o = baseOverrides || {};
   const pick = (override, fallback) => (Number.isFinite(parseFloat(override)) && parseFloat(override) > 0 ? override : fallback);
   return {
-    squares, pitchPct, storyPct, totalMultiplier,
+    squares, wastePct: waste, pitchPct, pitchWeighted: weighted !== null, storyPct, totalMultiplier,
     good: tier(pick(o.good, p.baseGood)),
     better: tier(pick(o.better, p.baseBetter)),
     best: tier(pick(o.best, p.baseBest)),
@@ -287,9 +434,17 @@ export function calcGoodBetterBest({ sqFt, pitch, stories, pricing, baseOverride
 
 // ─── Good/Better/Best Calculator (used on a job) ────────────────────────────
 export default function GoodBetterBest({ job, pricing, catalog, onSave, onClose, onOpenSettings, isAdmin }) {
-  const [sqFt, setSqFt] = useState(job.gbb?.sqFt || roofMeasurements(job)?.totalRoofArea || "");
-  const [pitch, setPitch] = useState(job.gbb?.pitch || "");
-  const [stories, setStories] = useState(job.gbb?.stories || 1);
+  const measured = roofMeasurements(job);
+  const mix = pitchMix(measured);
+  const measuredSource = measured ? (measured.source === "eagleview" ? "EagleView" : "Hover") : null;
+  const [sqFt, setSqFt] = useState(job.gbb?.sqFt || measured?.totalRoofArea || "");
+  const [pitch, setPitch] = useState(job.gbb?.pitch || measuredPitch(measured));
+  // "measured": pitch surcharge weighted across the measured pitches. Typing a pitch switches to it.
+  const [pitchMode, setPitchMode] = useState(job.gbb?.pitchMode || (job.gbb?.pitch ? "manual" : mix.length ? "measured" : "manual"));
+  const [stories, setStories] = useState(job.gbb?.stories || measuredStories(measured) || 1);
+  // Waste: what was saved, else the report's suggested waste on a fresh calc, else the company default.
+  const defaultWaste = (pricing || DEFAULT_PRICING).wasteFactorPct;
+  const [wastePct, setWastePct] = useState(job.gbb ? (job.gbb.wastePct ?? defaultWaste) : (measured?.suggestedWastePct ?? defaultWaste));
   const [savedFlash, setSavedFlash] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [fetchError, setFetchError] = useState(null);
@@ -308,19 +463,22 @@ export default function GoodBetterBest({ job, pricing, catalog, onSave, onClose,
   };
   const baseOverrides = { good: productRate(productIds.good), better: productRate(productIds.better), best: productRate(productIds.best) };
   const missingProducts = ["good", "better", "best"].filter(t => productIds[t] && baseOverrides[t] == null);
-  const result = calcGoodBetterBest({ sqFt, pitch, stories, pricing, baseOverrides });
+  const useMix = pitchMode === "measured" && mix.length > 0;
+  const result = calcGoodBetterBest({ sqFt, pitch, stories, pricing, baseOverrides, wastePct, pitchMix: useMix ? mix : null });
 
   const accessories = (catalog || []).filter(i => i.itemType === "accessory");
   const accessoryLines = accessories
     .filter(item => accessorySelections[item.id]?.checked)
-    .map(item => ({ item, ...calcAccessoryLine(item, result.squares, accessorySelections[item.id]?.qty) }));
+    .map(item => ({ item, ...calcAccessoryLine(item, result.squares, accessorySelections[item.id]?.qty, measured) }));
   const accessoriesTotal = accessoryLines.reduce((sum, l) => sum + l.total, 0);
+  const anyAbc = (catalog || []).some(i => i.abcItemNumber && i.abcCost != null);
 
   const toggleAccessory = (id) => setAccessorySelections(s => ({ ...s, [id]: { ...s[id], checked: !s[id]?.checked } }));
   const setAccessoryQty = (id, qty) => setAccessorySelections(s => ({ ...s, [id]: { ...s[id], qty } }));
 
   const save = () => {
-    onSave({ gbb: { sqFt, pitch, stories, productIds, accessorySelections, result, accessoriesTotal, calculatedAt: new Date().toISOString() } });
+    // ABC costs are deliberately not saved on the job (internal only).
+    onSave({ gbb: { sqFt, pitch, pitchMode, stories, wastePct, productIds, accessorySelections, result, accessoriesTotal, calculatedAt: new Date().toISOString() } });
     setSavedFlash(true);
     setTimeout(() => setSavedFlash(false), 1800);
   };
@@ -337,6 +495,7 @@ export default function GoodBetterBest({ job, pricing, catalog, onSave, onClose,
       if (!res.ok || !data.success) { setFetchError(data.error || "Couldn't fetch roof data for this address."); setFetching(false); return; }
       setSqFt(data.totalAreaSqFt);
       setPitch(data.pitchRisePerTwelve);
+      setPitchMode("manual");
       setLowConfidence(data.lowConfidence);
       const base = `Pulled ${data.totalAreaSqFt.toLocaleString()} sq ft across ${data.segmentCount} roof segment${data.segmentCount===1?"":"s"} · avg pitch ${data.pitchRisePerTwelve}/12${data.imageryDate ? ` · imagery from ${data.imageryDate.year}` : ""}.`;
       if (data.corrected) {
@@ -393,9 +552,19 @@ export default function GoodBetterBest({ job, pricing, catalog, onSave, onClose,
               🛰️ {fetchInfo}
             </div>
           )}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+          {measured && (
+            <div style={{ background: "#3b82f611", border: "1px solid #3b82f644", borderRadius: 7, padding: "8px 12px", fontSize: 11.5, color: "#93c5fd", marginBottom: 12, lineHeight: 1.5 }}>
+              📏 Measured by {measuredSource}{measured.reportType ? ` (${measured.reportType})` : ""}: {Number(measured.totalRoofArea).toLocaleString()} sq ft
+              {mix.length ? ` · ${(measured.pitches || []).map(p => `${p.pitch} ${Math.round(p.percentage ?? 0)}%`).join(", ")}` : ""}
+              {measured.suggestedWastePct != null ? ` · suggested waste ${measured.suggestedWastePct}%` : ""}
+              {measured.stories ? ` · ${measured.stories} stor${String(measured.stories) === "1" ? "y" : "ies"}` : ""}
+              {measured.hasLengths === false ? " · no line lengths (by-length materials need a quantity)" : ""}
+            </div>
+          )}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12 }}>
             <Field label="Roof Area" value={sqFt} onChange={setSqFt} suffix="sq ft" />
-            <Field label="Pitch (rise/12)" value={pitch} onChange={setPitch} suffix="/12" />
+            <Field label="Pitch (rise/12)" value={pitch} onChange={v => { setPitch(v); setPitchMode("manual"); }} suffix="/12" />
+            <Field label="Waste" value={wastePct} onChange={setWastePct} suffix="%" />
             <div>
               <label style={{ display: "block", fontSize: 10, fontWeight: 700, color: MUTED, textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 }}>Stories</label>
               <select value={stories} onChange={e => setStories(e.target.value)}
@@ -406,6 +575,13 @@ export default function GoodBetterBest({ job, pricing, catalog, onSave, onClose,
               </select>
             </div>
           </div>
+          {mix.length > 1 && (
+            <div style={{ fontSize: 11, color: MUTED, marginTop: 8 }}>
+              {useMix
+                ? <>Pitch surcharge is weighted by area across the measured pitches ({result.pitchPct}%). Typing a pitch uses that single pitch instead.</>
+                : <>Using the single pitch above. <button onClick={() => { setPitch(measuredPitch(measured)); setPitchMode("measured"); }} style={{ background: "none", border: "none", color: TEAL, cursor: "pointer", padding: 0, fontSize: 11, fontFamily: "inherit" }}>Weight by measured pitches instead</button></>}
+            </div>
+          )}
           {job.hoverId && !sqFt && (
             <div style={{ fontSize: 11, color: GOLD, marginTop: 10 }}>💡 This job has a Hover ID linked — pull measurements from the Details tab first, or enter area manually.</div>
           )}
@@ -414,8 +590,8 @@ export default function GoodBetterBest({ job, pricing, catalog, onSave, onClose,
         {sqFt > 0 && (
           <>
             <div style={{ background: PANEL2, borderRadius: 8, padding: "10px 14px", marginBottom: 16, fontSize: 12, color: MUTED, display: "flex", gap: 16, flexWrap: "wrap" }}>
-              <span><strong style={{ color: TEXT }}>{result.squares.toFixed(2)}</strong> squares (incl. waste)</span>
-              <span>Pitch surcharge: <strong style={{ color: result.pitchPct > 0 ? GOLD : TEXT }}>+{result.pitchPct}%</strong></span>
+              <span><strong style={{ color: TEXT }}>{result.squares.toFixed(2)}</strong> squares (incl. {result.wastePct}% waste)</span>
+              <span>Pitch surcharge: <strong style={{ color: result.pitchPct > 0 ? GOLD : TEXT }}>+{result.pitchPct}%</strong>{result.pitchWeighted ? " (area-weighted)" : ""}</span>
               <span>Story surcharge: <strong style={{ color: result.storyPct > 0 ? GOLD : TEXT }}>+{result.storyPct}%</strong></span>
             </div>
             {missingProducts.length > 0 && (
@@ -455,20 +631,24 @@ export default function GoodBetterBest({ job, pricing, catalog, onSave, onClose,
             {accessories.length > 0 && (
               <div style={{ background: PANEL, border: `1px solid ${BORDER}`, borderRadius: 10, padding: 16, marginBottom: 16 }}>
                 <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 800, fontSize: 13, color: GOLD, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>Tear-Off Materials</div>
-                <div style={{ fontSize: 11, color: MUTED, marginBottom: 12 }}>Added equally to all three tiers above. Based on {result.squares.toFixed(2)} squares.</div>
+                <div style={{ fontSize: 11, color: MUTED, marginBottom: 12 }}>Added equally to all three tiers above. Based on {result.squares.toFixed(2)} squares{measured?.hasLengths ? ` and ${measuredSource}'s measured lengths` : ""}.</div>
                 {accessories.map(item => {
                   const sel = accessorySelections[item.id];
-                  const line = calcAccessoryLine(item, result.squares, sel?.qty);
+                  const line = calcAccessoryLine(item, result.squares, sel?.qty, measured);
+                  const typed = item.calcMode === "manual" || line.needsQty;
                   return (
                     <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: `1px solid ${BORDER}` }}>
                       <input type="checkbox" checked={!!sel?.checked} onChange={() => toggleAccessory(item.id)} style={{ width: 16, height: 16, cursor: "pointer" }}/>
                       <div style={{ flex: 1, fontSize: 13, color: TEXT }}>{item.manufacturer || "(unnamed)"} <span style={{ color: MUTED, fontSize: 11 }}>— ${(parseFloat(item.pricePerUnit)||0).toLocaleString()}/{item.unit || "unit"}</span></div>
-                      {sel?.checked && item.calcMode === "manual" ? (
+                      {sel?.checked && typed ? (
                         <input type="number" min="0" placeholder="qty" value={sel?.qty || ""} onChange={e => setAccessoryQty(item.id, e.target.value)}
                           style={{ width: 60, background: PANEL2, border: `1px solid ${BORDER}`, borderRadius: 6, color: TEXT, padding: "6px 8px", fontSize: 12, fontFamily: "monospace", boxSizing: "border-box" }}/>
                       ) : sel?.checked ? (
-                        <span style={{ fontSize: 12, color: MUTED, fontFamily: "monospace" }}>{line.qty} {item.unit || "unit"}{line.qty === 1 ? "" : "s"}</span>
+                        <span style={{ fontSize: 12, color: MUTED, fontFamily: "monospace" }} title={line.lf != null ? `${Math.round(line.lf)} LF ÷ ${item.coveragePerUnit || 1} LF/${item.unit || "unit"}` : ""}>
+                          {line.lf != null ? `${Math.round(line.lf)} LF → ` : ""}{line.qty} {item.unit || "unit"}{line.qty === 1 ? "" : "s"}
+                        </span>
                       ) : null}
+                      {sel?.checked && line.needsQty && <span style={{ fontSize: 10, color: GOLD }}>no measured {LENGTH_BASES[item.lengthBasis || "ridgeHip"]?.label.split(" (")[0].toLowerCase()} — enter qty</span>}
                       <span style={{ fontSize: 13, fontWeight: 700, color: sel?.checked ? GOLD : MUTED, fontFamily: "monospace", width: 70, textAlign: "right" }}>{sel?.checked ? fmt(line.total) : "—"}</span>
                     </div>
                   );
@@ -478,6 +658,8 @@ export default function GoodBetterBest({ job, pricing, catalog, onSave, onClose,
                 </div>
               </div>
             )}
+
+            {anyAbc && <InternalCost result={result} accessoryLines={accessoryLines} accessoriesTotal={accessoriesTotal} productIds={productIds} findProduct={findProduct} />}
           </>
         )}
 
@@ -495,4 +677,31 @@ export default function GoodBetterBest({ job, pricing, catalog, onSave, onClose,
   );
 }
 
-export { DEFAULT_PRICING };
+// Staff-only: what each tier's materials cost at ABC, and what's left of the
+// tier price for labor, overhead and profit. Not saved, never customer-facing.
+function InternalCost({ result, accessoryLines, accessoriesTotal, productIds, findProduct }) {
+  const tiers = [["good", "Good", "#38bdf8"], ["better", "Better", GOLD], ["best", "Best", GREEN]].map(([key, label, color]) => {
+    const { cost, missing } = tierMaterialCost({ shingle: findProduct(productIds[key]), squares: result.squares, accessoryLines });
+    const price = result[key].total + accessoriesTotal;
+    return { key, label, color, cost, missing, price, left: price - cost };
+  });
+  return (
+    <div style={{ background: "#1a1408", border: `1px dashed ${GOLD}88`, borderRadius: 10, padding: 16, marginBottom: 16 }}>
+      <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 800, fontSize: 13, color: GOLD, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>🔒 Internal — ABC material cost</div>
+      <div style={{ fontSize: 11, color: MUTED, marginBottom: 12 }}>Staff only. ABC pricing is confidential — don't share it with homeowners or other suppliers. Not saved on the job.</div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+        {tiers.map(t => (
+          <div key={t.key} style={{ fontSize: 12, color: TEXT }}>
+            <div style={{ color: t.color, fontWeight: 800, marginBottom: 4 }}>{t.label}</div>
+            <div>Materials: <b style={{ fontFamily: "monospace" }}>{fmt(t.cost)}</b></div>
+            <div>Price: <span style={{ fontFamily: "monospace" }}>{fmt(t.price)}</span></div>
+            <div>Left for labor + margin: <b style={{ fontFamily: "monospace", color: t.left >= 0 ? GREEN : "#f87171" }}>{fmt(t.left)}</b>{t.price > 0 ? ` (${Math.round((t.left / t.price) * 100)}%)` : ""}</div>
+            {t.missing.length > 0 && <div style={{ color: GOLD, fontSize: 10, marginTop: 4 }}>No ABC cost for: {t.missing.join(", ")}</div>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export { DEFAULT_PRICING, shingleName };

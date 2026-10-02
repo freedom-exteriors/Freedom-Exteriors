@@ -1628,6 +1628,7 @@ export default function Pipeline({ session }) {
       {materialsCatalogOpen && (
         <MaterialsCatalogSettings
           catalog={materialsCatalog}
+          pricing={pricing}
           onSave={(c) => { saveCatalog(c); }}
           onClose={() => setMaterialsCatalogOpen(false)}
         />

@@ -260,6 +260,7 @@ export function toJobMeasurements(totals, report, { reportId, now = new Date() }
     flashingLength: lengths.flashing ?? null,
     stepFlashingLength: lengths.stepFlashing ?? null,
     parapetLength: lengths.parapets ?? null,
+    stories: totals.stories || null, // EagleView prints "1" or ">1"
     walls: walls ? { wallsArea: num(walls.WallsArea), sidingArea: num(walls.WallsSidingArea), masonryArea: num(walls.WallsMasonryArea), openingsArea: num(walls.PenetrationArea) } : null,
     warnings,
     fetchedAt: now.toISOString(),
