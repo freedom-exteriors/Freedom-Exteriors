@@ -22,18 +22,34 @@ describe("generated invoice .docx", () => {
     }
   });
 
-  it("matches the spec'd page setup, colors and sections", async () => {
-    const xml = await documentXml(await buildInvoiceDocx(sampleDocxInput().docx));
+  it("matches the measurements of reference/Freedom_Exteriors_Estimate_Pearson.docx", async () => {
+    const buf = await buildInvoiceDocx(sampleDocxInput().docx);
+    const xml = await documentXml(buf);
+    const zip = await JSZip.loadAsync(buf);
+    const styles = await zip.file("word/styles.xml")!.async("string");
     const text = docxPlainText(xml);
+    // Page: US Letter, 900 twips all round, header/footer 708.
     expect(xml).toMatch(/<w:pgSz w:w="12240" w:h="15840"/);
-    for (const side of ["top", "right", "bottom", "left"]) expect(xml).toMatch(new RegExp(`w:${side}="900"`));
-    expect(xml).toMatch(/<w:bottom w:val="single" w:color="F5B301" w:sz="16"/); // gold rule
-    expect(xml).toContain('w:fill="0E8A96"'); // teal header / balance row
+    expect(xml).toMatch(/<w:pgMar w:top="900" w:right="900" w:bottom="900" w:left="900" w:header="708" w:footer="708"/);
+    // Logo: the reference's image, at the reference's EMU size.
+    expect(xml).toContain('<wp:extent cx="2476500" cy="1647825"/>');
+    expect(Object.keys(zip.files).filter((f) => f.startsWith("word/media/") && f.endsWith(".png"))).toHaveLength(1);
+    // Gold rule: its own paragraph, bottom border F5B301 sz 16 space 1, after 200.
+    expect(xml).toMatch(/<w:pBdr><w:bottom w:val="single" w:color="F5B301" w:sz="16" w:space="1"\/><\/w:pBdr><w:spacing w:after="200"\/>/);
+    // Title / parties rows: two 5220 columns.
+    expect(xml.match(/<w:gridCol w:w="5220"\/><w:gridCol w:w="5220"\/>/g)).toHaveLength(2);
+    // Cost table + account summary: reference widths, empty 5th column folded in.
+    expect(xml.match(/<w:gridCol w:w="6264"\/><w:gridCol w:w="835"\/><w:gridCol w:w="1670"\/><w:gridCol w:w="1670"\/>/g)).toHaveLength(2);
+    expect(xml).toContain('<w:tcMar><w:top w:type="dxa" w:w="80"/><w:left w:type="dxa" w:w="100"/><w:bottom w:type="dxa" w:w="80"/><w:right w:type="dxa" w:w="100"/></w:tcMar>');
+    expect(xml).toContain('w:fill="0E8A96"'); // header row + BALANCE DUE
     expect(xml).toContain('w:fill="F2F2F2"'); // banding
-    expect(xml).toContain('<w:gridCol w:w="5220"/><w:gridCol w:w="5220"/>'); // title row
-    expect(text).toContain(COMPANY.addressLine);
-    for (const s of ["INVOICE", "PREPARED FOR", "JOB SITE", "SCOPE OF WORK", "Subtotal", "ACCOUNT SUMMARY", "BALANCE DUE", "PAYMENT TERMS"]) expect(text).toContain(s);
+    expect(xml).toContain('w:fill="222222"'); // total row
+    // Heading 2 is defined exactly as in the reference's styles.xml.
+    expect(styles).toMatch(/w:styleId="Heading2".*?<w:color w:val="2E74B5"\/>.*?<w:sz w:val="26"\/>/s);
+    expect(styles).toContain('w:ascii="Times New Roman"');
+    for (const s of ["INVOICE", "PREPARED FOR", "JOB SITE", "SCOPE OF WORK", "Subtotal (Labor & Materials)", "CONTRACT TOTAL", "ACCOUNT SUMMARY", "BALANCE DUE", "PAYMENT TERMS"]) expect(text).toContain(s);
     expect(text).not.toContain("ACCEPTANCE");
+    expect(text).not.toContain("Signature");
   });
 
   it("prints server-computed amounts", async () => {

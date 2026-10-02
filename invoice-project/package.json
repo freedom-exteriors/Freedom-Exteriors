@@ -9,8 +9,9 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "crop-logo": "node scripts/crop-logo.mjs",
-    "sample-docx": "tsx scripts/sample-docx.ts"
+    "logo": "node scripts/prepare-logo.mjs",
+    "sample-docx": "tsx scripts/sample-docx.ts",
+    "compare-reference": "tsx scripts/compare-reference.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",

@@ -25,8 +25,13 @@ export const COMPANY = {
   },
   invoicePrefix: "FE-INV",
   defaultTermsDays: 30,
-  // TODO(reference): replace with the PAYMENT TERMS wording from the
-  // reference estimate once it's in the repo. Editable per invoice.
-  defaultPaymentTerms:
-    "Payment is due by the due date shown above. Please make checks payable to Freedom Exteriors LLC and reference the invoice number. Thank you for your business!",
+  // Default PAYMENT TERMS (editable per invoice). Same shape as the
+  // reference estimate's section: typed "• " lines, then a closing paragraph.
+  // The wording is ours: the reference's terms are for an estimate
+  // (deposit at signing, valid 30 days) and don't fit an invoice.
+  defaultPaymentTerms: [
+    "• Balance due by the due date shown above",
+    "• Checks payable to Freedom Exteriors LLC; please include the invoice number",
+    "Questions about this invoice? Call (651) 283-1689. Thank you for choosing Freedom Exteriors.",
+  ].join("\n"),
 } as const;

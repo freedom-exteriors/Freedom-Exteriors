@@ -2,6 +2,7 @@ import {
   AlignmentType,
   BorderStyle,
   Document,
+  HeadingLevel,
   ImageRun,
   LineRuleType,
   Packer,
@@ -9,10 +10,9 @@ import {
   ShadingType,
   Table,
   TableCell,
-  TableLayoutType,
   TableRow,
   TextRun,
-  VerticalAlign,
+  VerticalAlignTable as VerticalAlign,
   WidthType,
   type IBorderOptions,
   type ParagraphChild,
@@ -23,41 +23,48 @@ import { toLongDate, toUsDate } from "../dates";
 import { LOGO } from "./logo";
 
 // ---------------------------------------------------------------------------
-// LAYOUT: every measurement in one place.
-// Units: twips/dxa (1/1440 in) for geometry, half-points for font sizes,
-// eighths of a point for border sizes, EMU for the logo.
-//
-// Values marked SPEC come from Nick's written spec of the reference estimate
-// (Freedom_Exteriors_Estimate_Pearson.docx). Values marked UNMEASURED are
-// placeholders until that file is in reference/ and can be measured from
-// word/document.xml and word/styles.xml.
+// LAYOUT: every measurement, taken from reference/Freedom_Exteriors_Estimate_
+// Pearson.docx (word/document.xml + word/styles.xml). Units: twips/dxa for
+// geometry and spacing, half-points for font sizes, eighths of a point for
+// borders, EMU for the logo.
+// Deviations from the reference are marked DEVIATION, with the reason.
 // ---------------------------------------------------------------------------
 export const LAYOUT = {
-  font: "Arial", // UNMEASURED: confirm from styles.xml docDefaults
-  page: { width: 12240, height: 15840, margin: 900 }, // SPEC: US Letter, 900 twips all sides
-  logo: { widthEmu: 2476500, heightEmu: 1647825 }, // SPEC
-  size: {
-    headerLine: 16, // SPEC 8pt
-    title: 30, // SPEC 15pt "INVOICE"
-    subtitle: 18, // SPEC 9pt italic gray
-    tag: 18, // SPEC 9pt bold gold
-    meta: 18, // SPEC 9pt (Invoice #, Date, Due Date, Terms)
-    label: 16, // SPEC 8pt bold (PREPARED FOR / JOB SITE)
-    value: 18, // SPEC 9pt
-    body: 18, // UNMEASURED: cost-table and summary text, assumed 9pt
-    detail: 15, // SPEC 7.5pt detail line under a cost description
-    sectionHeading: 20, // UNMEASURED: SCOPE OF WORK / ACCOUNT SUMMARY / PAYMENT TERMS
-    total: 22, // SPEC 11pt bold total
+  // The reference names no font at all (empty docDefaults, no theme), so
+  // Word falls back to Times New Roman 10pt. We name it explicitly so every
+  // app renders the same thing.
+  font: "Times New Roman",
+  defaultSize: 20,
+  page: { width: 12240, height: 15840, margin: 900, headerFooter: 708 },
+  logo: { widthEmu: 2476500, heightEmu: 1647825, after: 80 },
+  header: { addressAfter: 4, licenseAfter: 20, size: 16 },
+  goldRule: { size: 16, space: 1, after: 200 }, // on its own empty paragraph
+  titleTable: [5220, 5220],
+  title: { size: 30, subtitleSize: 18, subtitleAfter: 40, tagSize: 18, metaSize: 18 },
+  afterTitleSpacer: 150,
+  partiesTable: [5220, 5220],
+  parties: { labelSize: 16, labelAfter: 60, valueSize: 18 },
+  // "Heading 2" in the reference's styles.xml: color 2E74B5, 13pt, not bold.
+  heading: { color: "2E74B5", size: 26 },
+  headingSpacing: {
+    scope: { before: 200, after: 100 },
+    cost: { before: 100, after: 100 },
+    summary: { before: 300, after: 100 }, // DEVIATION: new section; uses the PAYMENT TERMS spacing
+    payment: { before: 300, after: 100 },
   },
-  goldRule: { size: 16, space: 4 }, // SPEC sz 16 (space UNMEASURED)
-  titleTable: [5220, 5220], // SPEC
-  partiesTable: [5220, 5220], // UNMEASURED: assumed same split as the title row
-  costTable: [5640, 1200, 1800, 1800], // UNMEASURED: Description, Qty, Rate, Amount (sum 10440)
-  totalsTable: [8640, 1800], // UNMEASURED
-  summaryTable: [8640, 1800], // UNMEASURED
-  cellMargin: { top: 40, bottom: 40, left: 100, right: 100 }, // UNMEASURED
-  gridBorder: { size: 4, color: "D9D9D9" }, // UNMEASURED
-  spacing: { sectionBefore: 200, sectionAfter: 80, line: 240 }, // UNMEASURED
+  body: { size: 18, after: 120 },
+  bullet: { after: 60 }, // the reference's typed "• " lines (PAYMENT TERMS)
+  // Cost table. The reference grid is 5220 / 835 / 1670 / 1670 / 1044, and the
+  // last 1044 column is empty on every row (a blank bordered column).
+  // DEVIATION: that empty column is folded into Description so the table still
+  // spans the full 10440 width.
+  costTable: [5220 + 1044, 835, 1670, 1670],
+  cellMargin: { top: 80, bottom: 80, left: 100, right: 100 },
+  tableBorder: { size: 4, color: "auto" },
+  costText: { size: 18, detailSize: 15, detailBefore: 40 },
+  totalRow: { fill: "222222", size: 22 },
+  balanceRow: { fill: "0E8A96", size: 22 },
+  paymentLastAfter: 200,
 } as const;
 
 const C = COMPANY.colors;
@@ -98,11 +105,10 @@ export interface DocxInvoice {
   paymentTerms: string | null;
 }
 
-const NONE: IBorderOptions = { style: BorderStyle.NONE, size: 0, color: "FFFFFF" };
-const NO_BORDERS = { top: NONE, bottom: NONE, left: NONE, right: NONE };
-const NO_TABLE_BORDERS = { ...NO_BORDERS, insideHorizontal: NONE, insideVertical: NONE };
-const GRID: IBorderOptions = { style: BorderStyle.SINGLE, size: LAYOUT.gridBorder.size, color: LAYOUT.gridBorder.color };
-const GRID_BORDERS = { top: GRID, bottom: GRID, left: GRID, right: GRID };
+const NONE: IBorderOptions = { style: BorderStyle.NONE, size: 0, color: "auto" };
+const NO_TABLE_BORDERS = { top: NONE, left: NONE, bottom: NONE, right: NONE, insideHorizontal: NONE, insideVertical: NONE };
+const LINE: IBorderOptions = { style: BorderStyle.SINGLE, size: LAYOUT.tableBorder.size, color: LAYOUT.tableBorder.color };
+const GRID_TABLE_BORDERS = { top: LINE, left: LINE, bottom: LINE, right: LINE, insideHorizontal: LINE, insideVertical: LINE };
 
 type Align = (typeof AlignmentType)[keyof typeof AlignmentType];
 
@@ -110,57 +116,57 @@ interface RunOpts {
   bold?: boolean;
   italics?: boolean;
   size?: number;
+  /** undefined = no color (Word "auto"), as on the reference's number cells */
   color?: string;
 }
 
 function run(text: string, o: RunOpts = {}) {
-  return new TextRun({
-    text,
-    font: LAYOUT.font,
-    size: o.size ?? LAYOUT.size.body,
-    bold: o.bold,
-    italics: o.italics,
-    color: o.color ?? C.text,
-  });
+  return new TextRun({ text, size: o.size, bold: o.bold, italics: o.italics, color: o.color });
 }
 
-function para(children: ParagraphChild[], o: { align?: Align; before?: number; after?: number; keepNext?: boolean } = {}) {
+function para(
+  children: ParagraphChild[],
+  o: { align?: Align; before?: number; after?: number; keepNext?: boolean; border?: IBorderOptions } = {},
+) {
   return new Paragraph({
     children,
     alignment: o.align,
     keepNext: o.keepNext,
-    keepLines: o.keepNext,
-    spacing: { before: o.before ?? 0, after: o.after ?? 0, line: LAYOUT.spacing.line, lineRule: LineRuleType.AUTO },
+    spacing: o.before === undefined && o.after === undefined ? undefined : { before: o.before, after: o.after },
+    border: o.border ? { bottom: o.border } : undefined,
   });
 }
 
-function cell(children: Paragraph[], width: number, o: { fill?: string; borders?: typeof GRID_BORDERS; margins?: boolean } = {}) {
+function cell(
+  children: Paragraph[],
+  width: number,
+  o: { fill?: string; margins?: boolean; vAlign?: (typeof VerticalAlign)[keyof typeof VerticalAlign]; span?: number } = {},
+) {
   return new TableCell({
-    children,
+    children: children.length ? children : [new Paragraph({})],
     width: { size: width, type: WidthType.DXA },
-    borders: o.borders ?? NO_BORDERS,
-    verticalAlign: VerticalAlign.TOP,
+    columnSpan: o.span,
+    verticalAlign: o.vAlign,
     shading: o.fill ? { type: ShadingType.CLEAR, color: "auto", fill: o.fill } : undefined,
-    margins: o.margins === false ? undefined : LAYOUT.cellMargin,
+    margins: o.margins ? { ...LAYOUT.cellMargin, marginUnitType: WidthType.DXA } : undefined,
   });
 }
 
-function table(widths: readonly number[], rows: TableRow[], borderless = true) {
+function table(widths: readonly number[], rows: TableRow[], borders: typeof NO_TABLE_BORDERS | typeof GRID_TABLE_BORDERS) {
   return new Table({
-    width: { size: widths.reduce((a, b) => a + b, 0), type: WidthType.DXA },
+    width: { size: CONTENT_WIDTH, type: WidthType.DXA },
     columnWidths: [...widths],
-    layout: TableLayoutType.FIXED,
-    borders: borderless ? NO_TABLE_BORDERS : undefined,
+    borders,
     rows,
   });
 }
 
-// keepNext: a heading never sits alone at the bottom of a page.
-function sectionHeading(text: string) {
-  return para([run(text, { bold: true, size: LAYOUT.size.sectionHeading, color: C.teal })], {
-    before: LAYOUT.spacing.sectionBefore,
-    after: LAYOUT.spacing.sectionAfter,
-    keepNext: true,
+function heading(text: string, spacing: { before: number; after: number }) {
+  return new Paragraph({
+    heading: HeadingLevel.HEADING_2,
+    spacing,
+    keepNext: true, // never leave a heading alone at the bottom of a page
+    children: [new TextRun(text)],
   });
 }
 
@@ -177,165 +183,170 @@ export function addressLines(address: string | null): string[] {
 // --------------------------------------------------------------- header
 
 function header(): Paragraph[] {
-  const out: Paragraph[] = [];
-  if (LOGO) {
-    out.push(
-      para(
+  const gray = { color: C.gray, size: LAYOUT.header.size };
+  const logoPara = LOGO
+    ? para(
         [
           new ImageRun({
             type: "png",
             data: Buffer.from(LOGO.base64, "base64"),
             transformation: {
-              width: Math.round(LAYOUT.logo.widthEmu / EMU_PER_PX),
-              height: Math.round(LAYOUT.logo.heightEmu / EMU_PER_PX),
+              width: LAYOUT.logo.widthEmu / EMU_PER_PX,
+              height: LAYOUT.logo.heightEmu / EMU_PER_PX,
             },
             altText: { name: "Logo", title: COMPANY.legalName, description: `${COMPANY.legalName} logo` },
           }),
         ],
-        { align: AlignmentType.CENTER },
-      ),
-    );
-  } else {
-    // Until the reference logo is in the repo: company name in its place.
-    out.push(para([run(COMPANY.legalName.toUpperCase(), { bold: true, size: 32, color: C.teal })], { align: AlignmentType.CENTER, after: 60 }));
-  }
-  const gray = { size: LAYOUT.size.headerLine, color: C.gray };
-  out.push(para([run(COMPANY.addressLine, gray)], { align: AlignmentType.CENTER }));
-  out.push(
-    new Paragraph({
-      alignment: AlignmentType.CENTER,
-      spacing: { before: 0, after: 120, line: LAYOUT.spacing.line, lineRule: LineRuleType.AUTO },
-      border: { bottom: { style: BorderStyle.SINGLE, size: LAYOUT.goldRule.size, color: C.gold, space: LAYOUT.goldRule.space } },
-      children: [run(COMPANY.licenseLine, gray)],
+        { align: AlignmentType.CENTER, after: LAYOUT.logo.after },
+      )
+    : para([run(COMPANY.legalName.toUpperCase(), { bold: true, size: 32, color: C.teal })], { align: AlignmentType.CENTER, after: LAYOUT.logo.after });
+  return [
+    logoPara,
+    para([run(COMPANY.addressLine, gray)], { align: AlignmentType.CENTER, after: LAYOUT.header.addressAfter }),
+    para([run(COMPANY.licenseLine, gray)], { align: AlignmentType.CENTER, after: LAYOUT.header.licenseAfter }),
+    para([], {
+      after: LAYOUT.goldRule.after,
+      border: { style: BorderStyle.SINGLE, size: LAYOUT.goldRule.size, color: C.gold, space: LAYOUT.goldRule.space },
     }),
-  );
-  return out;
+  ];
 }
 
 // ------------------------------------------------------------ title row
 
 function titleRow(inv: DocxInvoice): Table {
   const [lw, rw] = LAYOUT.titleTable;
-  const left = [para([run("INVOICE", { bold: true, size: LAYOUT.size.title, color: C.teal })])];
-  if (inv.subtitle) left.push(para([run(inv.subtitle, { italics: true, size: LAYOUT.size.subtitle, color: C.gray })]));
-  if (inv.tag) left.push(para([run(inv.tag, { bold: true, size: LAYOUT.size.tag, color: C.gold })]));
+  const t = LAYOUT.title;
+  const left = [para([run("INVOICE", { bold: true, color: C.teal, size: t.size })])];
+  if (inv.subtitle) left.push(para([run(inv.subtitle, { italics: true, color: C.gray, size: t.subtitleSize })], { after: t.subtitleAfter }));
+  if (inv.tag) left.push(para([run(inv.tag, { bold: true, color: C.gold, size: t.tagSize })]));
 
   const meta = (label: string, value: string) =>
-    para([run(`${label} `, { bold: true, size: LAYOUT.size.meta }), run(value, { size: LAYOUT.size.meta })], { align: AlignmentType.RIGHT });
+    para([run(`${label} `, { bold: true, color: C.text, size: t.metaSize }), run(value, { color: C.text, size: t.metaSize })], { align: AlignmentType.RIGHT });
   const right = [meta("Invoice #:", inv.invoiceNumber), meta("Date:", toLongDate(inv.invoiceDate))];
   if (inv.dueDate) right.push(meta("Due Date:", toLongDate(inv.dueDate)));
   if (inv.terms) right.push(meta("Terms:", inv.terms));
 
-  return table(LAYOUT.titleTable, [new TableRow({ children: [cell(left, lw, { margins: false }), cell(right, rw, { margins: false })] })]);
+  return table(LAYOUT.titleTable, [new TableRow({ children: [cell(left, lw), cell(right, rw, { vAlign: VerticalAlign.TOP })] })], NO_TABLE_BORDERS);
 }
 
 // ---------------------------------------------- prepared for / job site
 
 function parties(inv: DocxInvoice): Table {
   const [lw, rw] = LAYOUT.partiesTable;
-  const label = (t: string) => para([run(t, { bold: true, size: LAYOUT.size.label, color: C.gray })], { before: 200, after: 20 });
-  const value = (t: string, bold = false) => para([run(t, { size: LAYOUT.size.value, bold })]);
+  const p = LAYOUT.parties;
+  const label = (t: string) => para([run(t, { bold: true, color: C.teal, size: p.labelSize })], { after: p.labelAfter });
+  const value = (t: string) => para([run(t, { color: C.text, size: p.valueSize })]);
 
   const billing = addressLines(inv.customerAddress ?? inv.jobAddress);
-  const left = [label("PREPARED FOR"), value(inv.customerName, true), ...billing.map((l) => value(l))];
+  const left = [label("PREPARED FOR"), value(inv.customerName), ...billing.map(value)];
+  // Not on the reference (an estimate has no phone line); kept because the
+  // invoice form collects the customer's phone.
   if (inv.customerPhone) left.push(value(inv.customerPhone));
 
-  const site = addressLines(inv.jobAddress);
-  const right = [label("JOB SITE"), ...(site.length ? site.map((l) => value(l)) : [value("Same as above")])];
+  const site = inv.customerAddress ? addressLines(inv.jobAddress) : [];
+  const right = [label("JOB SITE"), ...(site.length ? site.map(value) : [value("Same as above")])];
 
-  return table(LAYOUT.partiesTable, [new TableRow({ children: [cell(left, lw, { margins: false }), cell(right, rw, { margins: false })] })]);
+  return table(LAYOUT.partiesTable, [new TableRow({ children: [cell(left, lw), cell(right, rw)] })], NO_TABLE_BORDERS);
 }
 
 // ---------------------------------------------------------------- scope
 
 function scope(inv: DocxInvoice): Paragraph[] {
   if (!inv.scope.length) return [];
+  // One scope line prints as a plain paragraph, exactly like the reference.
+  // Several print as typed "• " lines with after=60 (the reference's bullet
+  // style, see PAYMENT TERMS); the last line gets the body after=120.
+  const bullet = inv.scope.length > 1 ? "• " : "";
   return [
-    sectionHeading("SCOPE OF WORK"),
-    ...inv.scope.map(
-      (line) =>
-        new Paragraph({
-          bullet: { level: 0 },
-          spacing: { after: 40, line: LAYOUT.spacing.line, lineRule: LineRuleType.AUTO },
-          children: [run(line, { size: LAYOUT.size.value })],
-        }),
+    heading("SCOPE OF WORK", LAYOUT.headingSpacing.scope),
+    ...inv.scope.map((line, i) =>
+      para([run(`${bullet}${line}`, { color: C.text, size: LAYOUT.body.size })], {
+        after: i === inv.scope.length - 1 ? LAYOUT.body.after : LAYOUT.bullet.after,
+      }),
     ),
   ];
 }
 
-// ----------------------------------------------------------- cost table
+// ------------------------------------------- cost table (+ totals rows)
 
-function costTable(inv: DocxInvoice): Table {
+function costTable(inv: DocxInvoice): Array<Paragraph | Table> {
   const [dw, qw, rw, aw] = LAYOUT.costTable;
-  const head = (t: string, w: number, align: Align) =>
-    cell([para([run(t, { bold: true, color: "FFFFFF" })], { align })], w, { fill: C.teal, borders: GRID_BORDERS });
+  const s = LAYOUT.costText.size;
+
+  const head = (text: string, w: number, align: Align) =>
+    cell([para([run(text, { bold: true, color: "FFFFFF", size: s })], { align })], w, { fill: C.teal, margins: true, vAlign: VerticalAlign.CENTER });
 
   const rows = [
     new TableRow({
       tableHeader: true,
       children: [
-        head("DESCRIPTION", dw, AlignmentType.LEFT),
-        head("QTY", qw, AlignmentType.CENTER),
-        head("RATE", rw, AlignmentType.RIGHT),
-        head("AMOUNT", aw, AlignmentType.RIGHT),
+        head("Description", dw, AlignmentType.LEFT),
+        head("Qty", qw, AlignmentType.CENTER),
+        head("Rate", rw, AlignmentType.CENTER),
+        head("Amount", aw, AlignmentType.CENTER),
       ],
     }),
   ];
 
   inv.costLines.forEach((l, i) => {
-    const fill = i % 2 === 1 ? C.lightFill : undefined; // banding
-    const descParas = [para([run(l.description, { bold: true })])];
-    if (l.detail) descParas.push(para([run(l.detail, { size: LAYOUT.size.detail, color: C.gray })]));
+    const fill = i % 2 === 0 ? "FFFFFF" : C.lightFill; // banding, white first
+    const desc = [para([run(l.description, { bold: true, color: C.text, size: s })])];
+    if (l.detail) desc.push(para([run(l.detail, { italics: true, color: C.gray, size: LAYOUT.costText.detailSize })], { before: LAYOUT.costText.detailBefore }));
+    const num = (text: string, w: number, bold = false) =>
+      cell([para([run(text, { bold: bold || undefined, size: s })], { align: AlignmentType.CENTER })], w, { fill, vAlign: VerticalAlign.CENTER });
     rows.push(
       new TableRow({
         cantSplit: true,
         children: [
-          cell(descParas, dw, { fill, borders: GRID_BORDERS }),
-          cell([para([run(l.quantityMilli === null ? "" : formatQuantity(l.quantityMilli))], { align: AlignmentType.CENTER })], qw, { fill, borders: GRID_BORDERS }),
-          cell([para([run(l.rateCents === null ? "" : formatCents(l.rateCents))], { align: AlignmentType.RIGHT })], rw, { fill, borders: GRID_BORDERS }),
-          cell([para([run(formatCents(l.amountCents))], { align: AlignmentType.RIGHT })], aw, { fill, borders: GRID_BORDERS }),
+          cell(desc, dw, { fill, margins: true }),
+          num(l.quantityMilli === null ? "" : formatQuantity(l.quantityMilli), qw),
+          num(l.rateCents === null ? "" : formatCents(l.rateCents), rw),
+          num(formatCents(l.amountCents), aw, true),
         ],
       }),
     );
   });
-  return table(LAYOUT.costTable, rows, false);
-}
 
-// --------------------------------------------------------------- totals
-
-function totals(inv: DocxInvoice): Table {
-  const [lw, vw] = LAYOUT.totalsTable;
-  const line = (label: string, cents: number, big = false) =>
-    new TableRow({
+  // Totals rows live inside the same table: an empty cell spanning
+  // Description + Qty, the label under Rate, the amount under Amount.
+  const total = (label: string, cents: number, dark = false) => {
+    const fill = dark ? LAYOUT.totalRow.fill : "FFFFFF";
+    const o: RunOpts = dark ? { bold: true, color: "FFFFFF", size: LAYOUT.totalRow.size } : { bold: false, color: C.text, size: s };
+    return new TableRow({
+      cantSplit: true,
       children: [
-        cell([para([run(label, { bold: big, size: big ? LAYOUT.size.total : LAYOUT.size.body })], { align: AlignmentType.RIGHT, keepNext: !big })], lw, { margins: false }),
-        cell([para([run(formatCents(cents), { bold: big, size: big ? LAYOUT.size.total : LAYOUT.size.body })], { align: AlignmentType.RIGHT, keepNext: !big })], vw, { margins: false }),
+        cell([], dw + qw, { fill, margins: true, span: 2 }),
+        cell([para([run(label, o)], { align: AlignmentType.RIGHT, keepNext: !dark })], rw, { fill, margins: true, vAlign: VerticalAlign.CENTER }),
+        cell([para([run(formatCents(cents), o)], { align: AlignmentType.CENTER, keepNext: !dark })], aw, { fill, margins: true, vAlign: VerticalAlign.CENTER }),
       ],
     });
-  const rows = [line("Subtotal", inv.subtotalCents)];
-  if (inv.overheadPercentHundredths) rows.push(line(`Overhead (${formatPercent(inv.overheadPercentHundredths)})`, inv.overheadCents));
-  if (inv.profitPercentHundredths) rows.push(line(`Profit (${formatPercent(inv.profitPercentHundredths)})`, inv.profitCents));
-  rows.push(line("TOTAL", inv.contractTotalCents, true));
-  return table(LAYOUT.totalsTable, rows);
+  };
+  rows.push(total("Subtotal (Labor & Materials)", inv.subtotalCents));
+  if (inv.overheadPercentHundredths) rows.push(total(`Overhead (${formatPercent(inv.overheadPercentHundredths)})`, inv.overheadCents));
+  if (inv.profitPercentHundredths) rows.push(total(`Profit (${formatPercent(inv.profitPercentHundredths)})`, inv.profitCents));
+  rows.push(total("CONTRACT TOTAL", inv.contractTotalCents, true));
+
+  return [heading("COST DETAIL", LAYOUT.headingSpacing.cost), table(LAYOUT.costTable, rows, GRID_TABLE_BORDERS)];
 }
 
 // ------------------------------------------------------ account summary
 
 function accountSummary(inv: DocxInvoice): Array<Paragraph | Table> {
-  const [dw, aw] = LAYOUT.summaryTable;
-  // Every row except BALANCE DUE keeps with the next, so the summary never
-  // splits across pages.
+  // Same grid and borders as the cost table: description spans
+  // Description + Qty + Rate, amounts sit in the Amount column.
+  const [dw, qw, rw, aw] = LAYOUT.costTable;
+  const s = LAYOUT.costText.size;
   const row = (desc: string, amount: string, o: { balance?: boolean; bold?: boolean } = {}) => {
-    const keepNext = !o.balance;
-    const color = o.balance ? "FFFFFF" : C.text;
-    const bold = o.balance || o.bold;
-    const size = o.balance ? LAYOUT.size.total : LAYOUT.size.body;
-    const fill = o.balance ? C.teal : undefined;
+    const fill = o.balance ? LAYOUT.balanceRow.fill : "FFFFFF";
+    const r: RunOpts = o.balance
+      ? { bold: true, color: "FFFFFF", size: LAYOUT.balanceRow.size }
+      : { bold: o.bold, color: C.text, size: s };
+    const keepNext = !o.balance; // the whole summary stays on one page
     return new TableRow({
       cantSplit: true,
       children: [
-        cell([para([run(desc, { bold, color, size })], { keepNext })], dw, { fill, borders: GRID_BORDERS }),
-        cell([para([run(amount, { bold, color, size })], { align: AlignmentType.RIGHT, keepNext })], aw, { fill, borders: GRID_BORDERS }),
+        cell([para([run(desc, r)], { keepNext })], dw + qw + rw, { fill, margins: true, span: 3, vAlign: VerticalAlign.CENTER }),
+        cell([para([run(amount, r)], { align: AlignmentType.CENTER, keepNext })], aw, { fill, margins: true, vAlign: VerticalAlign.CENTER }),
       ],
     });
   };
@@ -348,39 +359,61 @@ function accountSummary(inv: DocxInvoice): Array<Paragraph | Table> {
   for (const c of inv.changeOrders) rows.push(row(`Change Order / Add-On - ${c.description}`, formatCents(c.amountCents)));
   rows.push(row("BALANCE DUE", formatCents(inv.balanceDueCents), { balance: true }));
 
-  return [sectionHeading("ACCOUNT SUMMARY"), table(LAYOUT.summaryTable, rows, false)];
+  return [heading("ACCOUNT SUMMARY", LAYOUT.headingSpacing.summary), table(LAYOUT.costTable, rows, GRID_TABLE_BORDERS)];
 }
 
 // ------------------------------------------------------- payment terms
 
 function paymentTerms(inv: DocxInvoice): Paragraph[] {
-  const text = (inv.paymentTerms ?? "").trim();
-  if (!text) return [];
-  return [sectionHeading("PAYMENT TERMS"), ...text.split(/\n+/).map((p) => para([run(p, { size: LAYOUT.size.value })], { after: 60 }))];
+  const lines = (inv.paymentTerms ?? "").split(/\n+/).map((l) => l.trim()).filter(Boolean);
+  if (!lines.length) return [];
+  return [
+    heading("PAYMENT TERMS", LAYOUT.headingSpacing.payment),
+    ...lines.map((l, i) =>
+      para([run(l, { color: C.text, size: LAYOUT.body.size })], {
+        after: i === lines.length - 1 ? LAYOUT.paymentLastAfter : LAYOUT.bullet.after,
+      }),
+    ),
+  ];
 }
 
 export async function buildInvoiceDocx(inv: DocxInvoice): Promise<Buffer> {
   const children: Array<Paragraph | Table> = [
     ...header(),
     titleRow(inv),
+    para([], { after: LAYOUT.afterTitleSpacer }),
     parties(inv),
     ...scope(inv),
   ];
-  if (inv.costLines.length) {
-    children.push(sectionHeading("COST DETAIL"), costTable(inv), para([], { after: 60 }), totals(inv));
-  }
+  if (inv.costLines.length) children.push(...costTable(inv));
   children.push(...accountSummary(inv), ...paymentTerms(inv));
 
   const doc = new Document({
     creator: COMPANY.legalName,
     title: `Invoice ${inv.invoiceNumber}`,
-    styles: { default: { document: { run: { font: LAYOUT.font, size: LAYOUT.size.body, color: C.text } } } },
+    styles: {
+      default: {
+        document: { run: { font: LAYOUT.font, size: LAYOUT.defaultSize } },
+        // Same definition as the reference's styles.xml "Heading 2".
+        heading2: {
+          run: { font: LAYOUT.font, color: LAYOUT.heading.color, size: LAYOUT.heading.size, bold: false },
+          paragraph: { spacing: { line: 240, lineRule: LineRuleType.AUTO } },
+        },
+      },
+    },
     sections: [
       {
         properties: {
           page: {
             size: { width: LAYOUT.page.width, height: LAYOUT.page.height },
-            margin: { top: LAYOUT.page.margin, bottom: LAYOUT.page.margin, left: LAYOUT.page.margin, right: LAYOUT.page.margin },
+            margin: {
+              top: LAYOUT.page.margin,
+              right: LAYOUT.page.margin,
+              bottom: LAYOUT.page.margin,
+              left: LAYOUT.page.margin,
+              header: LAYOUT.page.headerFooter,
+              footer: LAYOUT.page.headerFooter,
+            },
           },
         },
         children,
@@ -392,5 +425,8 @@ export async function buildInvoiceDocx(inv: DocxInvoice): Promise<Buffer> {
 
 /** All visible text in a generated .docx (used by tests). */
 export function docxPlainText(documentXml: string): string {
-  return [...documentXml.matchAll(/<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>/g)].map((m) => m[1]).join("");
+  const entities: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
+  return [...documentXml.matchAll(/<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>/g)]
+    .map((m) => m[1].replace(/&(amp|lt|gt|quot|apos);/g, (_, e: string) => entities[e]))
+    .join("");
 }
