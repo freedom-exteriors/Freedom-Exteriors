@@ -11,6 +11,7 @@ import LienNotice from "./LienNotice";
 import CancellationNotice from "./CancellationNotice";
 import DocsAcknowledgement from "./DocsAcknowledgement";
 import GoodBetterBest, { PricingSettings, MaterialsCatalogSettings, DEFAULT_PRICING } from "./GoodBetterBest";
+import EmailSupplier from "./EmailSupplier";
 import QuickQuote from "./QuickQuote";
 import ScopeReview from "./ScopeReview";
 import { compressImage, uploadJobPhoto, usePhotoUrls, deleteJobPhotoFiles, movePhotosToStorage } from "./photos";
@@ -1359,6 +1360,15 @@ export default function Pipeline({ session }) {
                         <a href="https://www.abcsupply.com/login" target="_blank" rel="noopener noreferrer" style={{ background:GOLD, color:"#000", borderRadius:8, padding:"10px 16px", fontWeight:800, fontSize:13, textDecoration:"none" }}>Order at ABC ↗</a>
                       </div>
                     </div>
+                  )}
+                  {((selected.materials||[]).length > 0 || selected.hoverMeasurements?.totalRoofArea || (selected.supplierEmails||[]).length > 0) && (
+                    <EmailSupplier
+                      key={selected.id}
+                      job={selected}
+                      contact={pricing.supplierContact}
+                      onSaveContact={c => savePricing({ ...pricing, supplierContact: c })}
+                      onSent={sent => updateJob(selected.id, { supplierEmails: [...(selected.supplierEmails || []), sent] })}
+                    />
                   )}
                 </div>
               )}
