@@ -3,7 +3,7 @@
 
 import type { ExtractedInvoice } from "./extract";
 import type { InvoiceFormInput } from "./invoice";
-import { parseDollarsToCents, formatCents } from "./money";
+import { parseDollarsToCents, formatCents, parseQuantityMilli } from "./money";
 import { isIsoDate } from "./dates";
 
 export interface ReviewDraft {
@@ -57,7 +57,13 @@ export function draftFromExtraction(x: ExtractedInvoice): ReviewDraft {
     form: {
       customerName: x.customer_name ?? "",
       customerPhone: x.customer_phone ?? "",
+      customerAddress: x.customer_address ?? "",
       jobAddress: x.job_address ?? "",
+      subtitle: x.subtitle ?? "",
+      tag: "",
+      overheadPercent: "",
+      profitPercent: "",
+      paymentTerms: "",
       contractDate: isIsoDate(x.contract_date) ? x.contract_date : "",
       invoiceDate: isIsoDate(x.invoice_date) ? x.invoice_date : "",
       dueDate: isIsoDate(x.due_date) ? x.due_date : "",
@@ -65,7 +71,19 @@ export function draftFromExtraction(x: ExtractedInvoice): ReviewDraft {
       contractTotal: money(x.contract_total),
       deposits: (x.deposits ?? []).map((d) => ({ date: isIsoDate(d.date) ? d.date! : "", description: d.description ?? "", amount: money(d.amount) })),
       changeOrders: (x.change_orders ?? []).map((c) => ({ description: c.description ?? "", amount: money(c.amount) })),
-      contractItems: (x.line_items ?? []).map((l) => ({ description: l.description ?? "", amount: money(l.amount) })),
+      costLines: (x.line_items ?? []).map((l) => {
+        // Keep qty/rate only when both read cleanly; otherwise the printed
+        // amount is used as-is.
+        const qtyOk = l.quantity !== null && parseQuantityMilli(l.quantity) !== null;
+        const rateOk = l.rate !== null && parseDollarsToCents(l.rate) !== null;
+        return {
+          description: l.description ?? "",
+          detail: l.detail ?? "",
+          qty: qtyOk && rateOk ? String(l.quantity) : "",
+          rate: qtyOk && rateOk ? money(l.rate) : "",
+          amount: money(l.amount),
+        };
+      }),
       balanceDue: money(x.balance_due),
     },
   };

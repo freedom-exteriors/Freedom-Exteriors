@@ -4,7 +4,8 @@ import Link from "next/link";
 import { InvoiceForm } from "@/components/InvoiceForm";
 import type { InvoiceFormInput, InvoiceRow, LineItemRow } from "@/lib/invoice";
 import { formFromInvoice } from "@/lib/formMapping";
-import { formatCents } from "@/lib/money";
+import { formatCents, formatQuantity } from "@/lib/money";
+import { quantityToMilli } from "@/lib/invoice";
 import { toLongDate, toUsDate, todayIso } from "@/lib/dates";
 import { api, openSigned } from "@/lib/clientApi";
 
@@ -117,13 +118,22 @@ export default function InvoiceDetail({ params }: { params: Promise<{ id: string
         <dl className="fields">
           <dt>Customer</dt><dd>{inv.customer_name}</dd>
           <dt>Phone</dt><dd>{inv.customer_phone || "-"}</dd>
-          <dt>Job address</dt><dd>{inv.job_address || "-"}</dd>
+          <dt>Mailing address</dt><dd>{inv.customer_address || "Same as job site"}</dd>
+          <dt>Job site</dt><dd>{inv.job_address || "-"}</dd>
+          <dt>Subtitle</dt><dd>{inv.subtitle || "-"} {inv.tag && <strong style={{ color: "#b88700" }}>· {inv.tag}</strong>}</dd>
           <dt>Contract date</dt><dd>{toLongDate(inv.contract_date) || "-"}</dd>
           <dt>Invoice date</dt><dd>{toLongDate(inv.invoice_date)}</dd>
           <dt>Due date</dt><dd>{toLongDate(inv.due_date) || "-"} {inv.terms && <span className="muted">({inv.terms})</span>}</dd>
           <dt>Paid date</dt><dd>{toLongDate(inv.paid_date) || "-"}</dd>
         </dl>
       </div>
+
+      {inv.payment_terms && (
+        <div className="card">
+          <h2 style={{ marginTop: 0 }}>Payment terms</h2>
+          <p style={{ whiteSpace: "pre-wrap", margin: 0 }}>{inv.payment_terms}</p>
+        </div>
+      )}
 
       {kind("scope").length > 0 && (
         <div className="card">
@@ -137,9 +147,21 @@ export default function InvoiceDetail({ params }: { params: Promise<{ id: string
         <div className="table-wrap">
           <table className="catalog">
             <tbody>
-              {kind("contract_item").map((c, i) => (
-                <tr key={`ci${i}`}><td className="wrap">{c.description}</td><td className="num">{c.amount_cents === null ? "" : formatCents(c.amount_cents)}</td></tr>
-              ))}
+              {kind("contract_item").map((c, i) => {
+                const q = quantityToMilli(c.quantity);
+                return (
+                  <tr key={`ci${i}`}>
+                    <td className="wrap">
+                      <strong>{c.description}</strong>
+                      {c.detail && <div className="muted small">{c.detail}</div>}
+                      {q !== null && c.rate_cents !== null && <div className="muted small">{formatQuantity(q)} × {formatCents(c.rate_cents)}</div>}
+                    </td>
+                    <td className="num">{c.amount_cents === null ? "" : formatCents(c.amount_cents)}</td>
+                  </tr>
+                );
+              })}
+              {inv.overhead_cents !== 0 && <tr><td>Overhead ({Number(inv.overhead_percent)}%)</td><td className="num">{formatCents(inv.overhead_cents)}</td></tr>}
+              {inv.profit_cents !== 0 && <tr><td>Profit ({Number(inv.profit_percent)}%)</td><td className="num">{formatCents(inv.profit_cents)}</td></tr>}
               <tr><td><strong>Contract total</strong></td><td className="num"><strong>{formatCents(inv.contract_total_cents)}</strong></td></tr>
               {kind("deposit").map((d, i) => (
                 <tr key={`d${i}`}><td className="wrap">Deposit received {toUsDate(d.line_date)} {d.description && `· ${d.description}`}</td><td className="num">({formatCents(d.amount_cents)})</td></tr>

@@ -1,6 +1,7 @@
 import "server-only";
 import { BUCKET, nextInvoiceNumber, supabaseAdmin } from "./supabaseAdmin";
 import { buildInvoiceDocx } from "./docx/buildInvoiceDocx";
+import { docxFromInvoice } from "./docx/fromInvoice";
 import {
   invoiceColumns,
   parseOurNumber,
@@ -12,6 +13,7 @@ import {
 } from "./invoice";
 
 const UNIQUE_VIOLATION = "23505";
+const LINE_ITEM_COLUMNS = "kind, description, detail, quantity, rate_cents, amount_cents, line_date, sort_order";
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 function isDuplicateNumber(err: { code?: string; message?: string } | null): boolean {
@@ -29,7 +31,7 @@ export async function loadInvoice(id: string): Promise<{ invoice: InvoiceRow; it
   if (!invoice) return null;
   const { data: items, error: e2 } = await db
     .from("invoice_line_items")
-    .select("kind, description, amount_cents, line_date, sort_order")
+    .select(LINE_ITEM_COLUMNS)
     .eq("invoice_id", id)
     .order("kind")
     .order("sort_order");
@@ -40,22 +42,7 @@ export async function loadInvoice(id: string): Promise<{ invoice: InvoiceRow; it
 // ------------------------------------------------------------ generated
 
 export async function renderAndStoreDocx(invoice: InvoiceRow, items: LineItemRow[]): Promise<string> {
-  const kind = (k: LineItemRow["kind"]) => items.filter((i) => i.kind === k).sort((a, b) => a.sort_order - b.sort_order);
-  const buf = await buildInvoiceDocx({
-    invoiceNumber: invoice.invoice_number,
-    invoiceDate: invoice.invoice_date,
-    dueDate: invoice.due_date,
-    contractDate: invoice.contract_date,
-    terms: invoice.terms,
-    customerName: invoice.customer_name,
-    customerPhone: invoice.customer_phone,
-    jobAddress: invoice.job_address,
-    scope: kind("scope").map((s) => s.description),
-    contractTotalCents: invoice.contract_total_cents,
-    deposits: kind("deposit").map((d) => ({ date: d.line_date, description: d.description, amountCents: d.amount_cents ?? 0 })),
-    changeOrders: kind("change_order").map((c) => ({ description: c.description, amountCents: c.amount_cents ?? 0 })),
-    balanceDueCents: invoice.balance_due_cents,
-  });
+  const buf = await buildInvoiceDocx(docxFromInvoice(invoice, items));
   const path = `generated/${invoice.invoice_number}.docx`;
   const db = supabaseAdmin();
   const up = await db.storage.from(BUCKET).upload(path, buf, { contentType: DOCX_MIME, upsert: true });
@@ -233,7 +220,7 @@ export async function listInvoices(f: CatalogFilters, limit = 2000): Promise<Inv
   let query = supabaseAdmin()
     .from("invoices")
     .select(
-      "id, invoice_number, invoice_number_source, duplicate_number_flag, customer_name, customer_phone, job_address, contract_date, invoice_date, due_date, terms, contract_total_cents, deposits_total_cents, change_orders_total_cents, balance_due_cents, status, paid_date, source, original_file_path, generated_file_path, extraction_warnings, created_at, updated_at",
+      "id, invoice_number, invoice_number_source, duplicate_number_flag, customer_name, customer_phone, customer_address, job_address, subtitle, tag, payment_terms, contract_date, invoice_date, due_date, terms, subtotal_cents, overhead_percent, overhead_cents, profit_percent, profit_cents, contract_total_cents, deposits_total_cents, change_orders_total_cents, balance_due_cents, status, paid_date, source, original_file_path, generated_file_path, extraction_warnings, created_at, updated_at",
     );
 
   const q = cleanSearch(f.q ?? "");
@@ -259,7 +246,7 @@ export async function lineItemsFor(ids: string[]): Promise<Map<string, LineItemR
     const chunk = ids.slice(i, i + 200);
     const { data, error } = await supabaseAdmin()
       .from("invoice_line_items")
-      .select("invoice_id, kind, description, amount_cents, line_date, sort_order")
+      .select(`invoice_id, ${LINE_ITEM_COLUMNS}`)
       .in("invoice_id", chunk);
     if (error) throw new Error(error.message);
     for (const row of data ?? []) {

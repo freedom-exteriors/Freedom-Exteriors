@@ -1,9 +1,9 @@
 // QuickBooks-style invoice CSV: one row per line item, invoice-level fields
 // repeated on every row. See docs/field-mapping.md.
 
-import { centsToPlain } from "./money";
+import { centsToPlain, formatPercent, formatQuantity, parsePercentHundredths } from "./money";
 import { toUsDate } from "./dates";
-import type { InvoiceRow, LineItemRow } from "./invoice";
+import { quantityToMilli, type InvoiceRow, type LineItemRow } from "./invoice";
 
 export const CSV_COLUMNS = [
   "Customer",
@@ -12,6 +12,8 @@ export const CSV_COLUMNS = [
   "Due Date",
   "Terms",
   "Item/Description",
+  "Qty",
+  "Rate",
   "Amount",
   "Balance",
   "Memo",
@@ -37,21 +39,36 @@ function moneyCell(cents: number | null | undefined): string {
 const STATUS_LABEL = { outstanding: "Outstanding", paid: "Paid", void: "Void" } as const;
 
 export function invoiceCsvLines(inv: InvoiceRow, items: LineItemRow[]): string[][] {
-  const lines: Array<{ desc: string; cents: number }> = [];
+  const lines: Array<{ desc: string; qty: string; rate: string; cents: number }> = [];
   const byKind = (k: LineItemRow["kind"]) =>
     items.filter((i) => i.kind === k).sort((a, b) => a.sort_order - b.sort_order);
 
-  const contractItems = byKind("contract_item").filter((i) => i.amount_cents !== null);
-  if (inv.source === "uploaded" && contractItems.length) {
-    for (const i of contractItems) lines.push({ desc: i.description, cents: i.amount_cents! });
+  // Cost lines (qty x rate), then overhead/profit if used. If an uploaded
+  // invoice has no priced lines, one "Contract total" row stands in.
+  const costLines = byKind("contract_item").filter((i) => i.amount_cents !== null);
+  if (costLines.length) {
+    for (const i of costLines) {
+      const milli = quantityToMilli(i.quantity);
+      lines.push({
+        desc: i.detail ? `${i.description} - ${i.detail}` : i.description,
+        qty: milli === null ? "" : formatQuantity(milli).replace(/,/g, ""),
+        rate: i.rate_cents === null ? "" : centsToPlain(i.rate_cents),
+        cents: i.amount_cents!,
+      });
+    }
+    const pct = (v: number | string | null) => (v === null ? null : parsePercentHundredths(String(v)));
+    const oh = pct(inv.overhead_percent);
+    const pr = pct(inv.profit_percent);
+    if (oh) lines.push({ desc: `Overhead (${formatPercent(oh)})`, qty: "", rate: "", cents: inv.overhead_cents });
+    if (pr) lines.push({ desc: `Profit (${formatPercent(pr)})`, qty: "", rate: "", cents: inv.profit_cents });
   } else {
     const desc = inv.contract_date ? `Contract total (agreement dated ${toUsDate(inv.contract_date)})` : "Contract total";
-    lines.push({ desc, cents: inv.contract_total_cents });
+    lines.push({ desc, qty: "", rate: "", cents: inv.contract_total_cents });
   }
-  for (const c of byKind("change_order")) lines.push({ desc: `Change order: ${c.description}`, cents: c.amount_cents ?? 0 });
+  for (const c of byKind("change_order")) lines.push({ desc: `Change order: ${c.description}`, qty: "", rate: "", cents: c.amount_cents ?? 0 });
   for (const d of byKind("deposit")) {
     const when = d.line_date ? ` ${toUsDate(d.line_date)}` : "";
-    lines.push({ desc: `Deposit received${when}${d.description ? ` - ${d.description}` : ""}`, cents: -(d.amount_cents ?? 0) });
+    lines.push({ desc: `Deposit received${when}${d.description ? ` - ${d.description}` : ""}`, qty: "", rate: "", cents: -(d.amount_cents ?? 0) });
   }
 
   return lines.map((l) => [
@@ -61,6 +78,8 @@ export function invoiceCsvLines(inv: InvoiceRow, items: LineItemRow[]): string[]
     toUsDate(inv.due_date),
     csvCell(inv.terms),
     csvCell(l.desc),
+    l.qty,
+    l.rate,
     moneyCell(l.cents),
     moneyCell(inv.balance_due_cents),
     csvCell(inv.job_address),

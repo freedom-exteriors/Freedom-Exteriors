@@ -10,7 +10,9 @@ export const EXTRACTION_MODEL = "claude-sonnet-5-5";
 const FIELD_NAMES = [
   "customer_name",
   "customer_phone",
+  "customer_address",
   "job_address",
+  "subtitle",
   "invoice_number",
   "invoice_date",
   "due_date",
@@ -40,7 +42,9 @@ const TOOL: Anthropic.Beta.BetaTool = {
     properties: {
       customer_name: { ...nullableString, description: "The customer billed (Bill To). Not Freedom Exteriors." },
       customer_phone: nullableString,
-      job_address: { ...nullableString, description: "Job / property address, one line." },
+      customer_address: { ...nullableString, description: "Customer mailing / billing address if printed separately from the job site, one line." },
+      job_address: { ...nullableString, description: "Job site / property address, one line." },
+      subtitle: { ...nullableString, description: "Short job description printed under the title, if any." },
       invoice_number: {
         ...nullableString,
         description: "The invoice number EXACTLY as printed (same characters, dashes, prefixes). null if the document shows no invoice number. Never invent one.",
@@ -54,8 +58,14 @@ const TOOL: Anthropic.Beta.BetaTool = {
         items: {
           type: "object",
           additionalProperties: false,
-          required: ["description", "amount"],
-          properties: { description: { type: "string" }, amount: money },
+          required: ["description", "detail", "quantity", "rate", "amount"],
+          properties: {
+            description: { type: "string" },
+            detail: { ...nullableString, description: "Smaller secondary text under the description, if any." },
+            quantity: { type: ["string", "null"], description: "Quantity as printed, e.g. \"32.5\". null if not shown." },
+            rate: { ...money, description: "Unit price as printed, no $ or commas. null if not shown." },
+            amount: money,
+          },
         },
       },
       contract_total: { ...money, description: "Contract / invoice total BEFORE deposits are subtracted." },
@@ -102,12 +112,14 @@ Rules:
 export interface ExtractedInvoice {
   customer_name: string | null;
   customer_phone: string | null;
+  customer_address: string | null;
   job_address: string | null;
+  subtitle: string | null;
   invoice_number: string | null;
   invoice_date: string | null;
   due_date: string | null;
   contract_date: string | null;
-  line_items: Array<{ description: string; amount: string | null }>;
+  line_items: Array<{ description: string; detail: string | null; quantity: string | null; rate: string | null; amount: string | null }>;
   contract_total: string | null;
   deposits: Array<{ date: string | null; description: string; amount: string | null }>;
   change_orders: Array<{ description: string; amount: string | null }>;

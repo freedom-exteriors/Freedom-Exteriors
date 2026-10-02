@@ -3,7 +3,9 @@
 -- authenticated keys can read/write nothing. Only the server (service role,
 -- which bypasses RLS) touches this data.
 
-create extension if not exists pg_trgm;
+-- Supabase keeps extensions out of the public schema.
+create schema if not exists extensions;
+create extension if not exists pg_trgm with schema extensions;
 
 -- ---------------------------------------------------------------- counters
 create table if not exists public.invoice_counters (
@@ -22,11 +24,23 @@ create table if not exists public.invoices (
   duplicate_number_flag     boolean not null default false,
   customer_name             text not null,
   customer_phone            text,
+  -- PREPARED FOR mailing address; blank means "same as the job site".
+  customer_address          text,
   job_address               text,
+  subtitle                  text,   -- job description under the INVOICE title
+  tag                       text,   -- optional short gold tag under the subtitle
+  payment_terms             text,   -- PAYMENT TERMS paragraph
   contract_date             date,
   invoice_date              date not null,
   due_date                  date,
   terms                     text,
+  -- Generated invoices: subtotal = sum of cost lines; contract total =
+  -- subtotal + overhead + profit. Uploaded invoices store the printed total.
+  subtotal_cents            bigint not null default 0,
+  overhead_percent          numeric(5,2),
+  overhead_cents            bigint not null default 0,
+  profit_percent            numeric(5,2),
+  profit_cents              bigint not null default 0,
   contract_total_cents      bigint not null default 0,
   deposits_total_cents      bigint not null default 0,
   change_orders_total_cents bigint not null default 0,
@@ -53,6 +67,9 @@ create table if not exists public.invoice_line_items (
   invoice_id   uuid not null references public.invoices(id) on delete cascade,
   kind         text not null check (kind in ('scope', 'deposit', 'change_order', 'contract_item')),
   description  text not null default '',
+  detail       text,            -- small grey line under the description
+  quantity     numeric(12,3),   -- cost lines: qty x rate = amount (server-side)
+  rate_cents   bigint,
   amount_cents bigint,
   line_date    date,
   sort_order   integer not null default 0
@@ -66,9 +83,9 @@ create table if not exists public.login_attempts (
 );
 
 -- ---------------------------------------------------------------- indexes
-create index if not exists invoices_customer_name_trgm on public.invoices using gin (customer_name gin_trgm_ops);
-create index if not exists invoices_job_address_trgm   on public.invoices using gin (job_address gin_trgm_ops);
-create index if not exists invoices_number_trgm        on public.invoices using gin (invoice_number gin_trgm_ops);
+create index if not exists invoices_customer_name_trgm on public.invoices using gin (customer_name extensions.gin_trgm_ops);
+create index if not exists invoices_job_address_trgm   on public.invoices using gin (job_address extensions.gin_trgm_ops);
+create index if not exists invoices_number_trgm        on public.invoices using gin (invoice_number extensions.gin_trgm_ops);
 create index if not exists invoices_invoice_date_idx   on public.invoices (invoice_date desc);
 create index if not exists invoices_status_idx         on public.invoices (status);
 create index if not exists invoices_customer_lower_idx on public.invoices (lower(customer_name));
@@ -83,8 +100,7 @@ begin
   return new;
 end $$;
 
-drop trigger if exists invoices_set_updated_at on public.invoices;
-create trigger invoices_set_updated_at before update on public.invoices
+create or replace trigger invoices_set_updated_at before update on public.invoices
   for each row execute function public.set_updated_at();
 
 -- Invoices are never hard-deleted: a deleted row would hide which numbers
@@ -95,8 +111,7 @@ begin
   raise exception 'Invoices cannot be deleted. Set status to void instead.';
 end $$;
 
-drop trigger if exists invoices_block_delete on public.invoices;
-create trigger invoices_block_delete before delete on public.invoices
+create or replace trigger invoices_block_delete before delete on public.invoices
   for each row execute function public.block_invoice_delete();
 
 -- ------------------------------------------------------ numbering function
@@ -184,14 +199,19 @@ begin
   if p_id is null then
     insert into public.invoices (
       invoice_number, invoice_number_source, document_invoice_number, duplicate_number_flag,
-      customer_name, customer_phone, job_address, contract_date, invoice_date, due_date, terms,
+      customer_name, customer_phone, customer_address, job_address, subtitle, tag, payment_terms,
+      contract_date, invoice_date, due_date, terms,
+      subtotal_cents, overhead_percent, overhead_cents, profit_percent, profit_cents,
       contract_total_cents, deposits_total_cents, change_orders_total_cents, balance_due_cents,
       status, paid_date, source, original_file_path, generated_file_path,
       extraction_json, extraction_raw_response, extraction_warnings)
     values (
       r.invoice_number, coalesce(r.invoice_number_source, 'assigned'), r.document_invoice_number,
       coalesce(r.duplicate_number_flag, false),
-      r.customer_name, r.customer_phone, r.job_address, r.contract_date, r.invoice_date, r.due_date, r.terms,
+      r.customer_name, r.customer_phone, r.customer_address, r.job_address, r.subtitle, r.tag, r.payment_terms,
+      r.contract_date, r.invoice_date, r.due_date, r.terms,
+      coalesce(r.subtotal_cents, 0), r.overhead_percent, coalesce(r.overhead_cents, 0),
+      r.profit_percent, coalesce(r.profit_cents, 0),
       coalesce(r.contract_total_cents, 0), coalesce(r.deposits_total_cents, 0),
       coalesce(r.change_orders_total_cents, 0), coalesce(r.balance_due_cents, 0),
       coalesce(r.status, 'outstanding'), r.paid_date, r.source, r.original_file_path, r.generated_file_path,
@@ -201,7 +221,16 @@ begin
     update public.invoices set
       customer_name = r.customer_name,
       customer_phone = r.customer_phone,
+      customer_address = r.customer_address,
       job_address = r.job_address,
+      subtitle = r.subtitle,
+      tag = r.tag,
+      payment_terms = r.payment_terms,
+      subtotal_cents = coalesce(r.subtotal_cents, 0),
+      overhead_percent = r.overhead_percent,
+      overhead_cents = coalesce(r.overhead_cents, 0),
+      profit_percent = r.profit_percent,
+      profit_cents = coalesce(r.profit_cents, 0),
       contract_date = r.contract_date,
       invoice_date = r.invoice_date,
       due_date = r.due_date,
@@ -218,8 +247,8 @@ begin
     delete from public.invoice_line_items where invoice_id = v_id;
   end if;
 
-  insert into public.invoice_line_items (invoice_id, kind, description, amount_cents, line_date, sort_order)
-  select v_id, i.kind, coalesce(i.description, ''), i.amount_cents, i.line_date, coalesce(i.sort_order, 0)
+  insert into public.invoice_line_items (invoice_id, kind, description, detail, quantity, rate_cents, amount_cents, line_date, sort_order)
+  select v_id, i.kind, coalesce(i.description, ''), i.detail, i.quantity, i.rate_cents, i.amount_cents, i.line_date, coalesce(i.sort_order, 0)
   from jsonb_populate_recordset(null::public.invoice_line_items, coalesce(p_items, '[]'::jsonb)) i;
 
   return v_id;
