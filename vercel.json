@@ -11,6 +11,14 @@
     {
       "source": "/hover/callback",
       "destination": "/api/hover?action=callback"
+    },
+    {
+      "source": "/api/eagleview/callback/:event",
+      "destination": "/api/eagleview?action=callback&event=:event"
+    },
+    {
+      "source": "/api/eagleview/callback",
+      "destination": "/api/eagleview?action=callback"
     }
   ],
   "crons": [
@@ -21,6 +29,9 @@
   ],
   "functions": {
     "api/scope-review.js": {
+      "maxDuration": 300
+    },
+    "api/eagleview.js": {
       "maxDuration": 300
     }
   }

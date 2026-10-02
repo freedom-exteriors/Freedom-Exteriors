@@ -1249,7 +1249,7 @@ export default function Pipeline({ session }) {
                     {selected.hoverId && <button onClick={() => fetchHoverMeasurements(selected)} style={{ background:"#ff6b2222", border:"1px solid #ff6b22", color:"#ff6b22", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>📐 Fetch Measurements</button>}
                     {isAdmin && <button onClick={() => removeJob(selected.id)} style={{ background:"#7c2d1222", border:"1px solid #7c2d12", color:"#f87171", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13 }}>🗑️ Delete</button>}
                   </div>
-                  <EagleViewImport key={selected.id} job={selected} onImported={m => updateJob(selected.id, { eagleviewMeasurements: m })} />
+                  <EagleViewImport key={selected.id} job={selected} onImported={m => updateJob(selected.id, { eagleviewMeasurements: m })} onPatch={patch => updateJob(selected.id, patch)} />
                 </div>
               )}
 
