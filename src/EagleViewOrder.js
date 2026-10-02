@@ -16,7 +16,7 @@ export const EV_PRODUCTS = [
 
 const money = (v) => (typeof v === "number" ? `$${v.toFixed(2)}` : null);
 const when = (s) => (s ? new Date(s).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "");
-const isOpen = (o) => o.status_id == null || ![4, 5].includes(o.status_id);
+const isOpen = (o) => !o.imported_at && (o.status_id == null || ![4, 5].includes(o.status_id));
 
 async function post(action, body) {
   const res = await apiFetch(`/api/eagleview?action=${action}`, {

@@ -117,7 +117,7 @@ async function importPdf(req, res) {
 
 // ---------- Ordering ----------
 
-const OPEN = (o) => o.status_id == null || ![4, 5].includes(o.status_id);
+const OPEN = (o) => !o.imported_at && (o.status_id == null || ![4, 5].includes(o.status_id));
 
 function orderAddress(job, zip) {
   const d = job.data || {};
@@ -184,6 +184,14 @@ async function refresh(req, res) {
   return res.status(200).json(result);
 }
 
+// A report is ready to import once it's Completed. EagleView's sandbox answers
+// every order with a canned sample report that stays "In Process" forever, so
+// there it's ready as soon as its measurement file (fileType 107) is listed.
+export function reportReady(report, env) {
+  if (report?.StatusId === 5) return true;
+  return env === "sandbox" && (report?.DeliveryFilesAvailable || []).some((f) => f.DeliveryFileTypeId === 107);
+}
+
 // Pulls a report's status from EagleView; once it's Completed, saves its
 // measurements (and PDF) onto the job. Safe to call repeatedly.
 async function syncReport(order, { evJson = null, reimport = false } = {}) {
@@ -196,7 +204,7 @@ async function syncReport(order, { evJson = null, reimport = false } = {}) {
     updated_at: new Date().toISOString(),
   };
   let imported = false;
-  if (report?.StatusId === 5 && (!order.imported_at || reimport || evJson)) {
+  if (reportReady(report, order.env) && (!order.imported_at || reimport || evJson)) {
     let totals;
     try {
       const json = evJson || JSON.parse((await getReportFile(order.report_id, 18, 107))?.toString("utf8") || "null");
@@ -282,7 +290,7 @@ async function webhook(req, res) {
         status_id: statusId, sub_status_id: subId,
         status: SUB_STATUS[subId] || STATUS[statusId] || order.status, updated_at: new Date().toISOString(),
       }).eq("report_id", reportId);
-      if (statusId === 5) await syncReport({ ...order, status_id: statusId });
+      if (statusId === 5 || order.env === "sandbox") await syncReport({ ...order, status_id: statusId });
     } else if (event === "FileDelivery") {
       const format = Number(q(req, "FileFormatId")), type = Number(q(req, "FileTypeId"));
       let body = req.body;

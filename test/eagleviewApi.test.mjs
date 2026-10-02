@@ -92,3 +92,13 @@ test("webhook tokens: signature, client, expiry and signed query", async () => {
   await assert.rejects(verifyWebhook(sign(claims).slice(0, -4) + "AAAA", query, opts), /signature/);
   await assert.rejects(verifyWebhook("", query, opts), /missing/);
 });
+
+test("sandbox sample reports import once their measurement file is listed", async () => {
+  const { reportReady } = await import("../api/eagleview.js");
+  const sample = fx("getreport-roof-68789287"); // what the sandbox returns for every order: "In Process" forever
+  assert.equal(sample.StatusId, 2);
+  assert.equal(reportReady(sample, "sandbox"), true);
+  assert.equal(reportReady(sample, "production"), false); // real orders wait for Completed
+  assert.equal(reportReady({ StatusId: 5 }, "production"), true);
+  assert.equal(reportReady({ StatusId: 2, DeliveryFilesAvailable: [{ DeliveryFileTypeId: 2 }] }, "sandbox"), false);
+});
