@@ -37,6 +37,7 @@ export default function EagleViewOrder({ job, onPatch }) {
   const [productId, setProductId] = useState(106);
   const [zip, setZip] = useState(job.zip || "");
   const [quote, setQuote] = useState(null);
+  const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(null);
   const [error, setError] = useState(null);
 
@@ -53,18 +54,17 @@ export default function EagleViewOrder({ job, onPatch }) {
   };
 
   const getQuote = () => run("quote", async () => {
+    setConfirming(false);
     setQuote(await post("quote", { jobId: job.id, productId, zip }));
   });
 
+  // Second click of a two-step confirm (an on-page step, not a browser pop-up).
   const placeOrder = () => run("order", async () => {
-    const price = money(quote?.price);
-    const sandbox = quote?.env === "sandbox";
-    const msg = `${sandbox ? "SANDBOX test order (free)" : "Place a REAL EagleView order"}\n\n${quote.product}\n${quote.address}\n${price ? `Price: ${price}` : "Price: not quoted — billed at your EagleView rate"}\n\nContinue?`;
-    if (!window.confirm(msg)) return;
     const { order } = await post("order", { jobId: job.id, productId, zip, confirm: true });
     setOrders((prev) => [order, ...prev]);
     if (zip.trim() && zip.trim() !== (job.zip || "")) onPatch({ zip: zip.trim() });
     setQuote(null);
+    setConfirming(false);
     setOpen(false);
   });
 
@@ -98,14 +98,27 @@ export default function EagleViewOrder({ job, onPatch }) {
             </select>
             <input aria-label="ZIP code" placeholder="ZIP" value={zip} onChange={(e) => { setZip(e.target.value); setQuote(null); }} style={{ ...input, width: 90 }} />
             <button onClick={getQuote} disabled={!!busy} style={btn(EV, !!busy)}>{busy === "quote" ? "Pricing…" : "Get price"}</button>
-            <button onClick={() => { setOpen(false); setQuote(null); setError(null); }} style={{ ...btn(MUTED, false), border: "none", background: "none" }}>Cancel</button>
+            <button onClick={() => { setOpen(false); setQuote(null); setConfirming(false); setError(null); }} style={{ ...btn(MUTED, false), border: "none", background: "none" }}>Cancel</button>
           </div>
           <div style={{ color: MUTED, fontSize: 11, marginTop: 6 }}>{[job.address, job.city, job.state].filter(Boolean).join(", ") || "This job has no address yet."}</div>
           {quote && (
             <div style={{ marginTop: 10, fontSize: 12, color: TEXT }}>
               {quote.env === "sandbox" && <div style={{ color: "#fbbf24", marginBottom: 4 }}>Sandbox: orders go to EagleView's test address ({quote.address}) and return a sample report.</div>}
               <div>{quote.product} — <b>{money(quote.price) || "price not returned (billed at your EagleView rate)"}</b></div>
-              <button onClick={placeOrder} disabled={!!busy} style={{ ...btn(OK, !!busy), marginTop: 8 }}>{busy === "order" ? "Placing order…" : `Place order${money(quote.price) ? ` · ${money(quote.price)}` : ""}`}</button>
+              {!confirming ? (
+                <button onClick={() => setConfirming(true)} disabled={!!busy} style={{ ...btn(OK, !!busy), marginTop: 8 }}>{`Place order${money(quote.price) ? ` · ${money(quote.price)}` : ""}`}</button>
+              ) : (
+                <div style={{ marginTop: 8, padding: 10, borderRadius: 7, border: `1px solid ${quote.env === "sandbox" ? "#fbbf24" : BAD}`, background: "#0f1923" }}>
+                  <div style={{ fontWeight: 700, color: quote.env === "sandbox" ? "#fbbf24" : BAD }}>
+                    {quote.env === "sandbox" ? "Sandbox test order (no charge)" : `Place a real EagleView order${money(quote.price) ? ` for ${money(quote.price)}` : " at your EagleView rate"}?`}
+                  </div>
+                  <div style={{ color: MUTED, fontSize: 11, margin: "4px 0 8px" }}>{quote.product} · {quote.address}</div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={placeOrder} disabled={!!busy} style={btn(OK, !!busy)}>{busy === "order" ? "Placing order…" : "Confirm order"}</button>
+                    <button onClick={() => setConfirming(false)} disabled={!!busy} style={btn(MUTED, !!busy)}>Back</button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
