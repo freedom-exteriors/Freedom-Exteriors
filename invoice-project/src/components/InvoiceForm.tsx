@@ -221,7 +221,7 @@ export function InvoiceForm({ mode, initial, flags = {}, submitLabel, busy, onSu
                   {i === 0 && <label>Description</label>}
                   <input value={row.description} placeholder="e.g. Architectural shingles" onChange={(e) => updateList("costLines", i, { description: e.target.value })} />
                 </div>
-                <div style={{ width: 90 }}>
+                <div className="w-qty">
                   {i === 0 && <label>Qty</label>}
                   <input className="money" value={row.qty} placeholder="1" inputMode="decimal" onChange={(e) => updateList("costLines", i, { qty: e.target.value })} />
                 </div>

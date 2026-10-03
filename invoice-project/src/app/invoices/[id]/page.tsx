@@ -61,6 +61,10 @@ export default function InvoiceDetail({ params }: { params: Promise<{ id: string
   if (editing) {
     return (
       <>
+        <div className="backbar">
+          <Link className="btn secondary" href="/">← Back to catalog</Link>
+          <button className="secondary" onClick={() => setEditing(false)}>Cancel editing</button>
+        </div>
         <h1>Edit {inv.invoice_number}</h1>
         {inv.source === "generated" && <p className="muted small">Saving rebuilds the Word file with the new details. The invoice number doesn&apos;t change.</p>}
         {error && <div className="alert error">{error}</div>}
@@ -71,7 +75,7 @@ export default function InvoiceDetail({ params }: { params: Promise<{ id: string
 
   return (
     <>
-      <p className="small"><Link href="/">← Catalog</Link></p>
+      <div className="backbar"><Link className="btn secondary" href="/">← Back to catalog</Link></div>
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
         <h1 style={{ margin: 0 }}>{inv.invoice_number}</h1>
         <span className={`pill ${inv.status}`}>{inv.status === "paid" ? `Paid ${toUsDate(inv.paid_date)}` : inv.status.toUpperCase()}</span>

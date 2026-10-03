@@ -24,7 +24,11 @@ body {
 a { color: var(--teal); }
 h1 { font-size: 22px; margin: 0 0 16px; }
 h2 { font-size: 16px; margin: 24px 0 8px; color: var(--teal); text-transform: uppercase; letter-spacing: .04em; }
+/* The menu stays at the top while you scroll, so you can always get home. */
 .topbar {
+  position: sticky;
+  top: 0;
+  z-index: 50;
   background: var(--card);
   border-bottom: 4px solid var(--gold);
   box-shadow: 0 2px 0 var(--teal);
@@ -62,6 +66,7 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .row > .grow { flex: 1; }
 .row > .w-date { width: 160px; }
 .row > .w-amt { width: 150px; }
+.row > .w-qty { width: 90px; }
 .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
 .alert { padding: 10px 14px; border-radius: 6px; margin-bottom: 12px; }
 .alert.error { background: var(--error-bg); color: var(--error); border: 1px solid #f5c2bd; }
@@ -86,8 +91,14 @@ table.catalog .num { text-align: right; font-variant-numeric: tabular-nums; }
 .filters { display: grid; grid-template-columns: 2fr 1.2fr 1fr 1fr 1fr auto; gap: 10px; align-items: end; margin-bottom: 12px; }
 @media (max-width: 860px) { .filters { grid-template-columns: 1fr 1fr; } }
 .review { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+/* The original only "sticks" when it sits BESIDE the form. Stacked on a
+   narrow screen it scrolls away normally and is capped at 60% of the screen,
+   so it can never cover the form. */
+.viewer { position: static; height: 60vh; background: #fff; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+@media (min-width: 1001px) { .viewer { position: sticky; top: 72px; height: calc(100vh - 90px); } }
 @media (max-width: 1000px) { .review { grid-template-columns: 1fr; } }
-.viewer { position: sticky; top: 12px; height: calc(100vh - 40px); background: #fff; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.review.hide-original { grid-template-columns: 1fr; }
+.backbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
 .viewer iframe, .viewer img { width: 100%; height: 100%; border: 0; object-fit: contain; }
 .muted { color: var(--muted); }
 .small { font-size: 13px; }
@@ -96,3 +107,21 @@ dl.fields dt { color: var(--muted); font-weight: 600; }
 dl.fields dd { margin: 0; }
 .dropzone { border: 2px dashed var(--teal); border-radius: 8px; padding: 32px; text-align: center; background: #f3fafb; }
 .login-wrap { max-width: 380px; margin: 12vh auto; }
+@media (max-width: 600px) {
+  .topbar-inner { gap: 4px 12px; padding: 6px 12px; }
+  .brand small { display: none; }
+  .nav a { margin-left: 0; margin-right: 12px; font-size: 14px; }
+  .topbar .link { font-size: 14px; }
+}
+/* Phones: line rows wrap instead of pushing the page wider than the screen. */
+@media (max-width: 600px) {
+  main { padding: 0 10px 40px; }
+  .card { padding: 14px; }
+  .grid2 { grid-template-columns: 1fr; }
+  .row { flex-wrap: wrap; }
+  .row > .grow { flex: 1 1 100%; }
+  .row > .w-amt, .row > .w-date { flex: 1 1 40%; width: auto; }
+  .row > .w-qty { flex: 1 1 20%; width: auto; }
+  .totals { max-width: none; }
+  .filters { grid-template-columns: 1fr; }
+}

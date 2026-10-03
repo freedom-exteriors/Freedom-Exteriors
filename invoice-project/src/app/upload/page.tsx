@@ -40,6 +40,7 @@ export default function UploadPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [docNumber, setDocNumber] = useState("");
+  const [showOriginal, setShowOriginal] = useState(true);
 
   async function handleFile(original: File | undefined) {
     if (!original) return;
@@ -132,13 +133,17 @@ export default function UploadPage() {
     const flagCount = Object.keys(draft.flags).length;
     return (
       <>
+        <div className="backbar">
+          <Link className="btn secondary" href="/">← Back to catalog (don&apos;t save)</Link>
+          <button className="secondary" onClick={() => setShowOriginal((v) => !v)}>{showOriginal ? "Hide original" : "Show original"}</button>
+        </div>
         <h1>Review: {stage.fileName}</h1>
         <p className="muted small">Nothing is saved until you click Save. Check every field against the original on the left.</p>
         {error && <div className="alert error">{error}</div>}
         {flagCount > 0 && <div className="alert warn">{flagCount} field{flagCount === 1 ? "" : "s"} highlighted in yellow need a look (missing or uncertain).</div>}
         {draft.warnings.map((w, i) => <div key={i} className="alert warn">{w}</div>)}
-        <div className="review">
-          <div className="viewer">
+        <div className={`review${showOriginal ? "" : " hide-original"}`}>
+          {showOriginal && <div className="viewer">
             {stage.ext === "pdf" ? (
               <iframe src={stage.viewUrl} title="Original document" />
             ) : stage.ext === "docx" ? (
@@ -151,7 +156,7 @@ export default function UploadPage() {
             ) : (
               <img src={stage.viewUrl} alt="Original document" />
             )}
-          </div>
+          </div>}
           <div>
             <InvoiceForm
               mode="uploaded"

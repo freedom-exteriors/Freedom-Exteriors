@@ -44,6 +44,7 @@ export default function NewInvoicePage() {
 
   return (
     <>
+      <div className="backbar"><Link className="btn secondary" href="/">← Back to catalog</Link></div>
       <h1>New invoice</h1>
       <p className="muted small">The invoice number is assigned when you save (FE-INV-YYYY-###).</p>
       {error && <div className="alert error">{error}</div>}
