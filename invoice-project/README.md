@@ -1,8 +1,8 @@
 # Invoice Project (Freedom Exteriors LLC)
 
 An internal web tool to **generate** branded .docx invoices, **upload and catalog** old invoices
-(read by Claude, checked by a person before saving), and **export** the catalog as a
-QuickBooks-style CSV.
+(read by Claude, checked by a person before saving), **export** the catalog as a
+QuickBooks-style CSV, and **build estimates** by checking boxes from a price book.
 
 - Next.js (App Router, TypeScript), deployed on Vercel from the `invoice-project/` folder of this repo
 - Supabase project **invoice-project** (Postgres + one private storage bucket)
@@ -25,6 +25,8 @@ Supabase project, and no shared code or data.
 | Claude extraction | `src/lib/extract.ts`, `src/lib/review.ts` |
 | CSV export | `src/lib/csv.ts`, see `docs/field-mapping.md` |
 | Login and session cookie | `src/lib/session.ts`, `src/proxy.ts`, `src/app/api/login` |
+| Estimates (validation, math, estimate → invoice) | `src/lib/estimate.ts`, `src/lib/estimates.server.ts` |
+| Estimate builder screen (check boxes) | `src/components/EstimateBuilder.tsx` |
 | Database | `supabase/migrations/` |
 
 ## How it's protected
@@ -47,6 +49,21 @@ Supabase project, and no shared code or data.
   parallel calls. `invoice_number` is also `UNIQUE`. Invoices can't be deleted (a trigger blocks it);
   use **Void** instead, which keeps the number used.
 - **CSV:** cells starting with `= + - @` are prefixed with `'` so spreadsheets don't run them as formulas.
+
+## Estimates
+
+- **Price book** (`/price-book`): one row per check box, grouped by trade. Prices start blank except
+  where Nick's own documents gave one (the Pearson estimate and the CRM's $650/$750/$850 per square
+  tiers); blank means "type a price on each estimate". Items are retired, never deleted.
+- **New estimate** (`/estimates/new`): checking a box adds a line with the price-book price; qty and
+  price are editable per estimate. The server recomputes qty × price, overhead, profit and the total.
+  Numbers come from `next_estimate_number(year)` (FE-EST-YYYY-###, same atomic counter design).
+- **Word file**: the reference document's own layout ("ESTIMATE & SCOPE OF WORK", COST ESTIMATE,
+  TOTAL ESTIMATE, PAYMENT TERMS, ACCEPTANCE signature block), both license numbers in the header.
+- **Statuses**: Draft, Sent, Accepted, Declined, Void. Estimates can't be deleted.
+- **Make invoice**: opens `/invoices/new?fromEstimate=<id>` pre-filled. Nothing is saved and no
+  invoice number is used until Create invoice; then the estimate is marked Accepted and linked to
+  the invoice, and can no longer be edited.
 
 ## Environment variables
 
@@ -72,7 +89,7 @@ password. To force everyone out without changing the password, change `SESSION_S
 
 ## Setting up from scratch
 
-1. Create a Supabase project, then run both files in `supabase/migrations/` in order (SQL editor, or
+1. Create a Supabase project, then run the files in `supabase/migrations/` in order (SQL editor, or
    the Supabase MCP `apply_migration`).
 2. Create a Vercel project from this repo with **Root Directory** = `invoice-project`, and add the five
    environment variables above.

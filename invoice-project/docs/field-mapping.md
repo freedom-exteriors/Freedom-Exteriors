@@ -51,3 +51,20 @@ CSV column order: Customer, Invoice No., Invoice Date, Due Date, Terms, Item/Des
 ## `invoice_counters` table
 
 Not exported. `(year, last_number)` holds the last FE-INV number handed out for each calendar year.
+
+## Estimates (`estimates` table)
+
+| Screen field | Column | Notes |
+| --- | --- | --- |
+| Estimate # | `estimate_number` | FE-EST-YYYY-###, from `next_estimate_number(year)` |
+| Customer, phone, mailing address, job site, subtitle, tag | same names as invoices | |
+| Estimate date | `estimate_date` | |
+| Valid for (days) | `valid_days` | 1–365, default 30; printed as "Valid For" |
+| Scope of work | `scope_text` | one bullet per line |
+| Lines | `items` (jsonb) | `{description, detail, quantity_milli, unit, rate_cents, amount_cents, price_book_item_id}`; amount computed by the server |
+| Overhead % / Profit % | `overhead_percent`, `profit_percent` | amounts in `overhead_cents`, `profit_cents` |
+| Total estimate | `total_cents` | subtotal + overhead + profit |
+| Status | `status` | draft / sent / accepted / declined / void |
+| Made into invoice | `invoice_id`, `accepted_date` | set by "Make invoice" → Create |
+
+Estimates are not part of the QuickBooks CSV export; only invoices are.

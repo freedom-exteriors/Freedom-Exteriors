@@ -125,3 +125,27 @@ dl.fields dd { margin: 0; }
   .totals { max-width: none; }
   .filters { grid-template-columns: 1fr; }
 }
+/* Estimates */
+.row > .w-unit { width: 80px; }
+details.trade { border-top: 1px solid var(--line); padding: 8px 0; }
+details.trade summary { cursor: pointer; font-weight: 700; color: var(--teal-dark); padding: 4px 0; }
+.checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px 12px; margin: 8px 0 4px; }
+label.check { display: flex; gap: 8px; align-items: flex-start; font-weight: 400; color: var(--text); font-size: 14px; margin: 0;
+  padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; background: #fff; }
+label.check.on { border-color: var(--teal); background: #eef7f8; }
+label.check input { width: 18px; height: 18px; margin: 1px 0 0; flex: none; accent-color: var(--teal); }
+.pill.est-draft { background: #eceff1; color: #444; }
+.pill.est-sent { background: #e6f2f3; color: var(--teal-dark); }
+.pill.est-accepted { background: var(--ok-bg); color: var(--ok); }
+.pill.est-declined { background: var(--error-bg); color: var(--error); }
+.pill.est-void { background: #eceff1; color: #666; text-decoration: line-through; }
+.filters.est { grid-template-columns: 2fr 1fr; }
+.pb-item { border-bottom: 1px solid var(--line); padding-top: 8px; }
+.pb-item.retired input { color: var(--muted); text-decoration: line-through; }
+.pb-head { margin-bottom: 0; }
+@media (max-width: 600px) {
+  .row > .w-unit { flex: 1 1 20%; width: auto; }
+  .filters.est { grid-template-columns: 1fr; }
+  .pb-head { display: none; }
+  .checks { grid-template-columns: 1fr; }
+}

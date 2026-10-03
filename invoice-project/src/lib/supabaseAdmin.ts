@@ -34,3 +34,10 @@ export async function signedDownloadUrl(path: string, downloadName?: string, sec
   if (error || !data) throw new Error(`Could not create download link: ${error?.message}`);
   return data.signedUrl;
 }
+
+/** Take the next FE-EST-YYYY-### number from the atomic counter. */
+export async function nextEstimateNumber(year: number): Promise<string> {
+  const { data, error } = await supabaseAdmin().rpc("next_estimate_number", { p_year: year });
+  if (error || typeof data !== "string") throw new Error(`Could not assign an estimate number: ${error?.message ?? "no data"}`);
+  return data;
+}
