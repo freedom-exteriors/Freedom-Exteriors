@@ -27,7 +27,10 @@ globalThis.fetch = async (url, init = {}) => {
   }
   if (u.hostname === "quickbooks.api.intuit.com") {
     const q = u.searchParams.get("query") || "";
-    if (q.startsWith("select * from Invoice")) return json({ QueryResponse: qbInvoices.length ? { Invoice: qbInvoices } : {} });
+    if (q.startsWith("select * from Invoice")) {
+      const found = qbInvoices.filter((i) => i.DocNumber === /DocNumber = '(.*)'/.exec(q)[1]);
+      return json({ QueryResponse: found.length ? { Invoice: found } : {} });
+    }
     if (q.startsWith("select * from Customer")) return json({ QueryResponse: {} });
     if (q.startsWith("select * from Item")) return json({ QueryResponse: { Item: [{ Id: "7", Name: "Exterior Services" }] } });
     if (u.pathname.endsWith("/customer")) return json({ Customer: { Id: "55" } });
@@ -97,6 +100,16 @@ test("final payment is capped at the QuickBooks balance", async () => {
   assert.equal(qbInvoices[0].Balance, 0);
   const again = await call("tool-payment", { docNumber: "FE-INV-2026-002", date: "2026-10-21", amountCents: 100 });
   assert.equal(again.body.alreadyPaid, true);
+});
+
+test("status: live, then voided in QuickBooks, then deleted", async () => {
+  let r = await call("tool-status", { docNumber: "FE-INV-2026-002" });
+  assert.deepEqual([r.body.exists, r.body.voided], [true, false]);
+  qbInvoices[0].TotalAmt = 0; qbInvoices[0].Balance = 0; qbInvoices[0].PrivateNote = "Voided";
+  r = await call("tool-status", { docNumber: "FE-INV-2026-002" });
+  assert.deepEqual([r.body.exists, r.body.voided], [true, true]);
+  r = await call("tool-status", { docNumber: "FE-INV-2026-999" });
+  assert.deepEqual([r.body.exists, r.body.voided], [false, false]);
 });
 
 test("job lookup returns the customer details", async () => {

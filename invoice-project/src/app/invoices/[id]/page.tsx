@@ -128,17 +128,20 @@ export default function InvoiceDetail({ params }: { params: Promise<{ id: string
             </span>
           )}
           {inv.status === "paid" && <button className="secondary" disabled={busy} onClick={() => setStatus("outstanding")}>Mark unpaid</button>}
-          {inv.status !== "void" && !inv.qb_invoice_id ? (
+          {inv.status !== "void" ? (
             <button
               className="danger"
               disabled={busy}
               onClick={() => {
-                if (confirm(`Void ${inv.invoice_number}? It stays in the catalog marked VOID and its number is never reused.`)) setStatus("void");
+                const msg = inv.qb_invoice_id
+                  ? `${inv.invoice_number} is in QuickBooks. Void it in QuickBooks FIRST, then click OK here to void it in this tool too (it checks QuickBooks).`
+                  : `Void ${inv.invoice_number}? It stays in the catalog marked VOID and its number is never reused.`;
+                if (confirm(msg)) setStatus("void");
               }}
             >
               Void
             </button>
-          ) : inv.status === "void" ? (
+          ) : !inv.qb_invoice_id ? (
             <button className="secondary" disabled={busy} onClick={() => setStatus("outstanding")}>Restore (un-void)</button>
           ) : null}
         </div>
@@ -154,7 +157,7 @@ export default function InvoiceDetail({ params }: { params: Promise<{ id: string
               {inv.qb_link && <a href={inv.qb_link} target="_blank" rel="noopener noreferrer">Open in QuickBooks ↗</a>}
             </p>
             <p className="muted small" style={{ marginBottom: 0 }}>
-              Locked here so the two can&apos;t disagree: make changes or void it in QuickBooks. Mark paid still works and records the payment in QuickBooks.
+              Locked here so the two can&apos;t disagree: make changes in QuickBooks. Mark paid still works and records the payment in QuickBooks. To cancel it, void it in QuickBooks first, then click Void here.
             </p>
           </>
         ) : inv.status === "void" ? (
