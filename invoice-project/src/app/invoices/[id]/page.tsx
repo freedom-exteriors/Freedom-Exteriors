@@ -94,10 +94,10 @@ export default function InvoiceDetail({ params }: { params: Promise<{ id: string
 
       <div className="card">
         <div className="actions" style={{ marginTop: 0 }}>
-          {inv.source === "generated" && inv.status !== "void" && (
+          {inv.status !== "void" && (
             <EmailPdf pdfUrl={`/api/invoices/${id}/pdf?v=${encodeURIComponent(inv.updated_at)}`} fileName={`${inv.invoice_number}.pdf`} message={invoiceEmail(inv)} />
           )}
-          {hasFile && <button className={inv.source === "generated" ? "secondary" : undefined} onClick={() => run(() => openSigned(`/api/invoices/${id}/download`))}>{inv.source === "generated" ? "Download .docx" : "Download original"}</button>}
+          {hasFile && <button className="secondary" onClick={() => run(() => openSigned(`/api/invoices/${id}/download`))}>{inv.source === "generated" ? "Download .docx" : "Download original"}</button>}
           {inv.source === "generated" && <button className="secondary" disabled={busy} onClick={() => run(() => api(`/api/invoices/${id}/rebuild`, { method: "POST" }), "Word file rebuilt.")}>Rebuild .docx</button>}
           {inv.status !== "void" && <button className="secondary" onClick={() => setEditing(true)}>Edit</button>}
           {inv.status === "outstanding" && (

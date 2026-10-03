@@ -32,7 +32,7 @@ export function docxFromInvoice(invoice: DocxSource, items: LineItemRow[]): Docx
       detail: c.detail,
       quantityMilli: quantityToMilli(c.quantity),
       rateCents: c.rate_cents,
-      amountCents: c.amount_cents ?? 0,
+      amountCents: c.amount_cents,
     })),
     subtotalCents: invoice.subtotal_cents,
     overheadPercentHundredths: pct(invoice.overhead_percent),

@@ -77,7 +77,8 @@ email account, sits in your Sent folder, and replies come to you. Nothing is sen
 - Browsers that can't share files (some desktop browsers) instead download the PDF and open a new
   email with the subject and message filled in; drag the PDF from Downloads into it.
 - Emailing a **Draft** estimate marks it **Sent**.
-- Generated invoices only. Uploaded invoices keep their original file (Download original).
+- Uploaded invoices get the same letterhead PDF, built from their reviewed details (lines with no
+  price print a blank amount). Download original still gives the file you uploaded.
 - PDFs use the built-in Times font, which covers normal English text and symbols like • — ½ é.
   Emoji and unusual symbols are left out of the PDF (the .docx keeps them).
 

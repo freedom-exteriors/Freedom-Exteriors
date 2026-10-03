@@ -89,7 +89,8 @@ export interface DocxCostLine {
   detail: string | null;
   quantityMilli: number | null;
   rateCents: number | null;
-  amountCents: number;
+  /** null = no amount on the document (uploaded invoices); prints blank. */
+  amountCents: number | null;
 }
 
 export interface DocxInvoice {
@@ -287,6 +288,15 @@ type CostFields = Pick<
   "costLines" | "subtotalCents" | "overheadPercentHundredths" | "overheadCents" | "profitPercentHundredths" | "profitCents" | "contractTotalCents"
 >;
 
+/**
+ * Subtotal / overhead / profit rows only when they add up to the total.
+ * An uploaded invoice can keep its printed contract total while its lines
+ * show no prices; "Subtotal $0.00" above the real total would be wrong.
+ */
+export function showsBreakdown(inv: Pick<DocxInvoice, "subtotalCents" | "overheadCents" | "profitCents" | "contractTotalCents">): boolean {
+  return inv.subtotalCents + inv.overheadCents + inv.profitCents === inv.contractTotalCents;
+}
+
 function costTable(inv: CostFields, labels: { heading: string; total: string }): Array<Paragraph | Table> {
   const [dw, qw, rw, aw] = LAYOUT.costTable;
   const s = LAYOUT.costText.size;
@@ -339,9 +349,11 @@ function costTable(inv: CostFields, labels: { heading: string; total: string }):
       ],
     });
   };
-  rows.push(total("Subtotal (Labor & Materials)", inv.subtotalCents));
-  if (inv.overheadPercentHundredths) rows.push(total(`Overhead (${formatPercent(inv.overheadPercentHundredths)})`, inv.overheadCents));
-  if (inv.profitPercentHundredths) rows.push(total(`Profit (${formatPercent(inv.profitPercentHundredths)})`, inv.profitCents));
+  if (showsBreakdown(inv)) {
+    rows.push(total("Subtotal (Labor & Materials)", inv.subtotalCents));
+    if (inv.overheadPercentHundredths) rows.push(total(`Overhead (${formatPercent(inv.overheadPercentHundredths)})`, inv.overheadCents));
+    if (inv.profitPercentHundredths) rows.push(total(`Profit (${formatPercent(inv.profitPercentHundredths)})`, inv.profitCents));
+  }
   rows.push(total(labels.total, inv.contractTotalCents, true));
 
   return [heading(labels.heading, LAYOUT.headingSpacing.cost), table(LAYOUT.costTable, rows, GRID_TABLE_BORDERS)];

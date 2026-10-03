@@ -3,7 +3,7 @@ import { COMPANY } from "../company";
 import { formatCents, formatPercent, formatQuantity } from "../money";
 import { toLongDate, toUsDate } from "../dates";
 import { LOGO } from "../docx/logo";
-import { addressLines, LAYOUT, type DocxEstimate, type DocxInvoice } from "../docx/buildInvoiceDocx";
+import { addressLines, LAYOUT, showsBreakdown, type DocxEstimate, type DocxInvoice } from "../docx/buildInvoiceDocx";
 
 // PDF version of the letterhead, for emailing. Same layout and the same
 // LAYOUT measurements as the .docx (converted to points), drawn directly
@@ -298,9 +298,12 @@ function costTable(f: Flow, inv: CostFields, labels: { heading: string; total: s
       { blocks: [{ runs: [{ text: formatCents(cents), ...r }], align: "center" }], fill, vCenter: true },
     ];
   };
-  const totals = [total("Subtotal (Labor & Materials)", inv.subtotalCents)];
-  if (inv.overheadPercentHundredths) totals.push(total(`Overhead (${formatPercent(inv.overheadPercentHundredths)})`, inv.overheadCents));
-  if (inv.profitPercentHundredths) totals.push(total(`Profit (${formatPercent(inv.profitPercentHundredths)})`, inv.profitCents));
+  const totals: Cell[][] = [];
+  if (showsBreakdown(inv)) {
+    totals.push(total("Subtotal (Labor & Materials)", inv.subtotalCents));
+    if (inv.overheadPercentHundredths) totals.push(total(`Overhead (${formatPercent(inv.overheadPercentHundredths)})`, inv.overheadCents));
+    if (inv.profitPercentHundredths) totals.push(total(`Profit (${formatPercent(inv.profitPercentHundredths)})`, inv.profitCents));
+  }
   totals.push(total(labels.total, inv.contractTotalCents, true));
   gridTable(f, [...rows, ...totals], headerRow, totals.length);
 }
