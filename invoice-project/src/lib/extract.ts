@@ -24,14 +24,17 @@ const FIELD_NAMES = [
   "balance_due",
 ] as const;
 
-const nullableString = { type: ["string", "null"] };
+// Strict tool schemas allow at most 16 nullable/union-typed parameters, so
+// every field is a plain string and "" means "not on the document".
+// normalizeFields() turns "" back into null before anything else sees it.
+const nullableString = { type: "string" };
 const money = {
-  type: ["string", "null"],
-  description: "Plain number as printed, no $ or commas, e.g. \"12450.00\". Negative for credits. null if not on the document.",
+  type: "string",
+  description: "Plain number as printed, no $ or commas, e.g. \"12450.00\". Negative for credits. Empty string if not on the document.",
 };
-const date = { type: ["string", "null"], description: "YYYY-MM-DD, or null if not on the document." };
+const date = { type: "string", description: "YYYY-MM-DD, or empty string if not on the document." };
 
-const TOOL: Anthropic.Beta.BetaTool = {
+export const TOOL: Anthropic.Beta.BetaTool = {
   name: "record_invoice",
   description: "Record the fields read from the invoice document.",
   strict: true,
@@ -47,7 +50,7 @@ const TOOL: Anthropic.Beta.BetaTool = {
       subtitle: { ...nullableString, description: "Short job description printed under the title, if any." },
       invoice_number: {
         ...nullableString,
-        description: "The invoice number EXACTLY as printed (same characters, dashes, prefixes). null if the document shows no invoice number. Never invent one.",
+        description: "The invoice number EXACTLY as printed (same characters, dashes, prefixes). Empty string if the document shows no invoice number. Never invent one.",
       },
       invoice_date: date,
       due_date: date,
@@ -62,8 +65,8 @@ const TOOL: Anthropic.Beta.BetaTool = {
           properties: {
             description: { type: "string" },
             detail: { ...nullableString, description: "Smaller secondary text under the description, if any." },
-            quantity: { type: ["string", "null"], description: "Quantity as printed, e.g. \"32.5\". null if not shown." },
-            rate: { ...money, description: "Unit price as printed, no $ or commas. null if not shown." },
+            quantity: { type: "string", description: "Quantity as printed, e.g. \"32.5\". Empty string if not shown." },
+            rate: { ...money, description: "Unit price as printed, no $ or commas. Empty string if not shown." },
             amount: money,
           },
         },
@@ -103,9 +106,9 @@ const TOOL: Anthropic.Beta.BetaTool = {
 const PROMPT = `This is a past invoice from Freedom Exteriors LLC, a roofing/siding/windows/doors contractor. Read every page and call the record_invoice tool once with what the document says.
 
 Rules:
-- Copy values exactly as printed. Do not calculate or guess values that are not on the document; use null instead.
+- Copy values exactly as printed. Do not calculate or guess values that are not on the document; use an empty string instead.
 - The customer is who is being billed, never Freedom Exteriors itself.
-- If the document prints an invoice number, copy it character-for-character. If it doesn't, use null.
+- If the document prints an invoice number, copy it character-for-character. If it doesn't, use an empty string.
 - List any field you are not sure about in low_confidence_fields.
 - You must respond by calling record_invoice.`;
 
@@ -170,7 +173,7 @@ export async function extractInvoice(file: Buffer, mime: SupportedMime) {
     });
   } catch (err) {
     if (err instanceof Anthropic.BadRequestError) {
-      throw new ExtractionError(`Claude could not read this file (${err.message}). Very long PDFs (over 100 pages) or damaged files can cause this.`);
+      throw new ExtractionError(`Claude could not read this file (${err.message}).`);
     }
     if (err instanceof Anthropic.AuthenticationError) throw new ExtractionError("The Anthropic API key was rejected. Check ANTHROPIC_API_KEY.");
     if (err instanceof Anthropic.RateLimitError) throw new ExtractionError("Anthropic rate limit hit. Wait a minute and try again.");
@@ -185,5 +188,22 @@ export async function extractInvoice(file: Buffer, mime: SupportedMime) {
       response.stop_reason === "max_tokens" ? "The document was too long to read in one pass." : "Claude did not return structured data for this file.",
     );
   }
-  return { fields: call.input as ExtractedInvoice, raw: response };
+  return { fields: normalizeFields(call.input), raw: response };
+}
+
+/** "" (the schema's "not on the document") → null, recursively. */
+export function normalizeFields(input: unknown): ExtractedInvoice {
+  const walk = (v: unknown): unknown => {
+    if (typeof v === "string") return v.trim() === "" ? null : v;
+    if (Array.isArray(v)) return v.map(walk);
+    if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x)]));
+    return v;
+  };
+  const out = walk(input) as ExtractedInvoice;
+  // Arrays and line descriptions must stay present for the review screen.
+  out.line_items = (out.line_items ?? []).map((l) => ({ ...l, description: l.description ?? "" }));
+  out.deposits = (out.deposits ?? []).map((d) => ({ ...d, description: d.description ?? "" }));
+  out.change_orders = (out.change_orders ?? []).map((c) => ({ ...c, description: c.description ?? "" }));
+  out.low_confidence_fields = out.low_confidence_fields ?? [];
+  return out;
 }
