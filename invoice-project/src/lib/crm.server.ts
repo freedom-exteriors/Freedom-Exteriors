@@ -25,7 +25,7 @@ export interface CrmJob {
 
 const CRM_URL = (process.env.CRM_URL || "https://freedom-exteriors.vercel.app").replace(/\/$/, "");
 
-export async function crmCall<T>(action: "tool-job" | "tool-invoice" | "tool-payment", body: unknown): Promise<T> {
+export async function crmCall<T>(action: "tool-job" | "tool-invoice" | "tool-payment" | "tool-status", body: unknown): Promise<T> {
   const key = process.env.INVOICE_TOOL_KEY;
   if (!key || key.length < 32) throw new CrmError("The link to the CRM isn't set up (INVOICE_TOOL_KEY is missing).", 500);
   let res: Response;

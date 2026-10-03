@@ -191,7 +191,15 @@ export async function setStatus(id: string, status: InvoiceStatus, paidDate: str
   const inv = loaded.invoice;
   let qbNote: string | null = null;
   if (inv.qb_invoice_id && status !== inv.status) {
-    if (status === "void") throw new InvoiceLockedError(`This invoice is in QuickBooks (${inv.qb_doc_number}). Void it in QuickBooks first, then here.`);
+    if (inv.status === "void") throw new InvoiceLockedError(`This invoice was voided in QuickBooks (${inv.qb_doc_number}), so it stays void. Make a new invoice instead.`);
+    if (status === "void") {
+      // Only once it's voided (or deleted) in QuickBooks, so the two never disagree.
+      const qbState = await crmCall<{ exists: boolean; voided: boolean }>("tool-status", { docNumber: inv.qb_doc_number });
+      if (qbState.exists && !qbState.voided) {
+        throw new InvoiceLockedError(`${inv.qb_doc_number} is still active in QuickBooks. Void it in QuickBooks first (open it there, More → Void), then void it here.`);
+      }
+      qbNote = qbState.exists ? "It's voided in QuickBooks too." : "It's no longer in QuickBooks.";
+    }
     if (inv.status === "paid") throw new InvoiceLockedError(`This invoice's payment is in QuickBooks (${inv.qb_doc_number}). Delete that payment in QuickBooks to un-pay it.`);
     if (status === "paid" && inv.balance_due_cents > 0) {
       // Record the final payment in QuickBooks first; only then mark it paid here.

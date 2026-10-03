@@ -10,6 +10,7 @@
 //   POST ?action=tool-job     { jobId }  -> the job's customer details
 //   POST ?action=tool-invoice { ...invoice } -> creates it in QuickBooks (once)
 //   POST ?action=tool-payment { docNumber, date, amountCents, note }
+//   POST ?action=tool-status  { docNumber } -> is it still in QuickBooks / voided?
 import { requireStaff, supabaseAdmin } from "./_lib/supabase.js";
 import { APP_ORIGIN, getIntegration, setIntegration, clearIntegration, createOAuthState, consumeOAuthState } from "./_lib/integrations.js";
 import { toolKeyOk, jobForTool, validatePush, qbInvoiceBody, qbPaymentBody, qbInvoiceLink } from "./_lib/invoiceTool.js";
@@ -172,7 +173,20 @@ async function invoiceToolAction(action, req, res) {
       });
     }
 
-    if (action === "tool-payment") {
+    if (action === "tool-status") {
+      const docNumber = typeof body.docNumber === "string" ? body.docNumber.trim() : "";
+      if (!docNumber) return res.status(400).json({ error: "Missing invoice number" });
+      const invoice = await findInvoiceByDocNumber(conn, docNumber);
+      if (!invoice) return res.status(200).json({ exists: false, voided: false });
+      // QuickBooks voids by zeroing the amounts and noting "Voided".
+      const voided = Number(invoice.TotalAmt) === 0 && /void/i.test(invoice.PrivateNote || "");
+      return res.status(200).json({
+        exists: true, voided,
+        totalCents: Math.round(Number(invoice.TotalAmt) * 100), balanceCents: Math.round(Number(invoice.Balance) * 100),
+      });
+    }
+
+        if (action === "tool-payment") {
       const docNumber = typeof body.docNumber === "string" ? body.docNumber.trim() : "";
       const amountCents = body.amountCents;
       if (!docNumber || !/^\d{4}-\d{2}-\d{2}$/.test(body.date || "") || !Number.isSafeInteger(amountCents) || amountCents <= 0) {

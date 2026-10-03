@@ -17,7 +17,9 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/invoices/[i
     return NextResponse.json(row);
   } catch (e) {
     if (e instanceof InvoiceLockedError) return jsonError(e.message, 409);
-    if (e instanceof CrmError) return jsonError(`Not marked paid: QuickBooks didn't record the payment (${e.message}).`, 502);
+    if (e instanceof CrmError) {
+      return jsonError(status === "void" ? `Not voided: couldn't check QuickBooks (${e.message}).` : `Not marked paid: QuickBooks didn't record the payment (${e.message}).`, 502);
+    }
     return serverError(e, "set status");
   }
 }
