@@ -51,6 +51,19 @@ export const LAYOUT = {
     cost: { before: 100, after: 100 },
     summary: { before: 300, after: 100 }, // DEVIATION: new section; uses the PAYMENT TERMS spacing
     payment: { before: 300, after: 100 },
+    acceptance: { before: 100, after: 100 },
+  },
+  // ACCEPTANCE block (estimates only), measured from the reference.
+  acceptance: {
+    statement: "By signing below, both parties agree to the scope of work and pricing outlined above.",
+    statementAfter: 100,
+    table: [5120, 200, 5120],
+    lineSize: 6,
+    lineColor: "999999",
+    firstLineBefore: 400,
+    secondLineBefore: 200,
+    captionBefore: 60,
+    captionSize: 16,
   },
   body: { size: 18, after: 120 },
   bullet: { after: 60 }, // the reference's typed "• " lines (PAYMENT TERMS)
@@ -213,25 +226,25 @@ function header(): Paragraph[] {
 
 // ------------------------------------------------------------ title row
 
-function titleRow(inv: DocxInvoice): Table {
+function titleRow(title: string, d: { subtitle: string | null; tag: string | null }, metaPairs: Array<[string, string]>): Table {
   const [lw, rw] = LAYOUT.titleTable;
   const t = LAYOUT.title;
-  const left = [para([run("INVOICE", { bold: true, color: C.teal, size: t.size })])];
-  if (inv.subtitle) left.push(para([run(inv.subtitle, { italics: true, color: C.gray, size: t.subtitleSize })], { after: t.subtitleAfter }));
-  if (inv.tag) left.push(para([run(inv.tag, { bold: true, color: C.gold, size: t.tagSize })]));
+  const left = [para([run(title, { bold: true, color: C.teal, size: t.size })])];
+  if (d.subtitle) left.push(para([run(d.subtitle, { italics: true, color: C.gray, size: t.subtitleSize })], { after: t.subtitleAfter }));
+  if (d.tag) left.push(para([run(d.tag, { bold: true, color: C.gold, size: t.tagSize })]));
 
   const meta = (label: string, value: string) =>
     para([run(`${label} `, { bold: true, color: C.text, size: t.metaSize }), run(value, { color: C.text, size: t.metaSize })], { align: AlignmentType.RIGHT });
-  const right = [meta("Invoice #:", inv.invoiceNumber), meta("Date:", toLongDate(inv.invoiceDate))];
-  if (inv.dueDate) right.push(meta("Due Date:", toLongDate(inv.dueDate)));
-  if (inv.terms) right.push(meta("Terms:", inv.terms));
+  const right = metaPairs.map(([k, v]) => meta(k, v));
 
   return table(LAYOUT.titleTable, [new TableRow({ children: [cell(left, lw), cell(right, rw, { vAlign: VerticalAlign.TOP })] })], NO_TABLE_BORDERS);
 }
 
 // ---------------------------------------------- prepared for / job site
 
-function parties(inv: DocxInvoice): Table {
+type PartyFields = Pick<DocxInvoice, "customerName" | "customerPhone" | "customerAddress" | "jobAddress">;
+
+function parties(inv: PartyFields): Table {
   const [lw, rw] = LAYOUT.partiesTable;
   const p = LAYOUT.parties;
   const label = (t: string) => para([run(t, { bold: true, color: C.teal, size: p.labelSize })], { after: p.labelAfter });
@@ -251,7 +264,7 @@ function parties(inv: DocxInvoice): Table {
 
 // ---------------------------------------------------------------- scope
 
-function scope(inv: DocxInvoice): Paragraph[] {
+function scope(inv: { scope: string[] }): Paragraph[] {
   if (!inv.scope.length) return [];
   // One scope line prints as a plain paragraph, exactly like the reference.
   // Several print as typed "• " lines with after=60 (the reference's bullet
@@ -269,7 +282,12 @@ function scope(inv: DocxInvoice): Paragraph[] {
 
 // ------------------------------------------- cost table (+ totals rows)
 
-function costTable(inv: DocxInvoice): Array<Paragraph | Table> {
+type CostFields = Pick<
+  DocxInvoice,
+  "costLines" | "subtotalCents" | "overheadPercentHundredths" | "overheadCents" | "profitPercentHundredths" | "profitCents" | "contractTotalCents"
+>;
+
+function costTable(inv: CostFields, labels: { heading: string; total: string }): Array<Paragraph | Table> {
   const [dw, qw, rw, aw] = LAYOUT.costTable;
   const s = LAYOUT.costText.size;
 
@@ -324,9 +342,9 @@ function costTable(inv: DocxInvoice): Array<Paragraph | Table> {
   rows.push(total("Subtotal (Labor & Materials)", inv.subtotalCents));
   if (inv.overheadPercentHundredths) rows.push(total(`Overhead (${formatPercent(inv.overheadPercentHundredths)})`, inv.overheadCents));
   if (inv.profitPercentHundredths) rows.push(total(`Profit (${formatPercent(inv.profitPercentHundredths)})`, inv.profitCents));
-  rows.push(total("CONTRACT TOTAL", inv.contractTotalCents, true));
+  rows.push(total(labels.total, inv.contractTotalCents, true));
 
-  return [heading("COST DETAIL", LAYOUT.headingSpacing.cost), table(LAYOUT.costTable, rows, GRID_TABLE_BORDERS)];
+  return [heading(labels.heading, LAYOUT.headingSpacing.cost), table(LAYOUT.costTable, rows, GRID_TABLE_BORDERS)];
 }
 
 // ------------------------------------------------------ account summary
@@ -364,7 +382,7 @@ function accountSummary(inv: DocxInvoice): Array<Paragraph | Table> {
 
 // ------------------------------------------------------- payment terms
 
-function paymentTerms(inv: DocxInvoice): Paragraph[] {
+function paymentTerms(inv: { paymentTerms: string | null }): Paragraph[] {
   const lines = (inv.paymentTerms ?? "").split(/\n+/).map((l) => l.trim()).filter(Boolean);
   if (!lines.length) return [];
   return [
@@ -377,20 +395,83 @@ function paymentTerms(inv: DocxInvoice): Paragraph[] {
   ];
 }
 
+// ----------------------------------------------- acceptance (estimates)
+
+function acceptance(clientName: string): Array<Paragraph | Table> {
+  const a = LAYOUT.acceptance;
+  const line = (before: number) =>
+    para([run(" ", { size: LAYOUT.body.size })], { before, border: { style: BorderStyle.SINGLE, size: a.lineSize, color: a.lineColor, space: 1 } });
+  const caption = (t: string) => para([run(t, { color: C.gray, size: a.captionSize })], { before: a.captionBefore });
+  const side = (who: string) => [line(a.firstLineBefore), caption(who), line(a.secondLineBefore), caption("Date")];
+  const [lw, gw, rw] = a.table;
+  return [
+    heading("ACCEPTANCE", LAYOUT.headingSpacing.acceptance),
+    para([run(a.statement, { color: C.text, size: LAYOUT.body.size })], { after: a.statementAfter }),
+    table(
+      a.table,
+      [
+        new TableRow({
+          cantSplit: true,
+          children: [
+            cell(side(`${COMPANY.shortName} — Authorized Signature`), lw),
+            cell([], gw),
+            cell(side(`Client — Acceptance Signature${clientName ? ` (${clientName})` : ""}`), rw),
+          ],
+        }),
+      ],
+      NO_TABLE_BORDERS,
+    ),
+  ];
+}
+
 export async function buildInvoiceDocx(inv: DocxInvoice): Promise<Buffer> {
+  const meta: Array<[string, string]> = [["Invoice #:", inv.invoiceNumber], ["Date:", toLongDate(inv.invoiceDate)]];
+  if (inv.dueDate) meta.push(["Due Date:", toLongDate(inv.dueDate)]);
+  if (inv.terms) meta.push(["Terms:", inv.terms]);
   const children: Array<Paragraph | Table> = [
     ...header(),
-    titleRow(inv),
+    titleRow("INVOICE", inv, meta),
     para([], { after: LAYOUT.afterTitleSpacer }),
     parties(inv),
     ...scope(inv),
   ];
-  if (inv.costLines.length) children.push(...costTable(inv));
+  if (inv.costLines.length) children.push(...costTable(inv, { heading: "COST DETAIL", total: "CONTRACT TOTAL" }));
   children.push(...accountSummary(inv), ...paymentTerms(inv));
+  return packDocument(`Invoice ${inv.invoiceNumber}`, children);
+}
 
+export interface DocxEstimate extends PartyFields, CostFields {
+  estimateNumber: string;
+  estimateDate: string;
+  validDays: number;
+  subtitle: string | null;
+  tag: string | null;
+  scope: string[];
+  paymentTerms: string | null;
+}
+
+/** Estimate: the reference document's own layout, ACCEPTANCE block included. */
+export async function buildEstimateDocx(est: DocxEstimate): Promise<Buffer> {
+  const children: Array<Paragraph | Table> = [
+    ...header(),
+    titleRow("ESTIMATE & SCOPE OF WORK", est, [
+      ["Estimate #:", est.estimateNumber],
+      ["Date:", toLongDate(est.estimateDate)],
+      ["Valid For:", `${est.validDays} days`],
+    ]),
+    para([], { after: LAYOUT.afterTitleSpacer }),
+    parties(est),
+    ...scope(est),
+  ];
+  if (est.costLines.length) children.push(...costTable(est, { heading: "COST ESTIMATE", total: "TOTAL ESTIMATE" }));
+  children.push(...paymentTerms(est), ...acceptance(est.customerName));
+  return packDocument(`Estimate ${est.estimateNumber}`, children);
+}
+
+function packDocument(title: string, children: Array<Paragraph | Table>): Promise<Buffer> {
   const doc = new Document({
     creator: COMPANY.legalName,
-    title: `Invoice ${inv.invoiceNumber}`,
+    title,
     styles: {
       default: {
         document: { run: { font: LAYOUT.font, size: LAYOUT.defaultSize } },
