@@ -2,7 +2,13 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
-  serverExternalPackages: ["sharp"],
+  // pdfkit reads its font files from node_modules at run time, so it must not
+  // be bundled, and those files must ship with the PDF routes.
+  serverExternalPackages: ["sharp", "pdfkit"],
+  outputFileTracingIncludes: {
+    "/api/invoices/[id]/pdf": ["./node_modules/pdfkit/js/data/**"],
+    "/api/estimates/[id]/pdf": ["./node_modules/pdfkit/js/data/**"],
+  },
   async headers() {
     return [
       {

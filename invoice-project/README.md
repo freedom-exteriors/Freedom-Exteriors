@@ -17,6 +17,8 @@ Supabase project, and no shared code or data.
 | Area | Files |
 | --- | --- |
 | Company name, address, licenses, colors | `src/lib/company.ts` (the only place to change them) |
+| PDF version (for emailing) | `src/lib/pdf/buildPdf.ts`: the same layout, drawn with pdfkit from the same `LAYOUT` numbers |
+| Email PDF button and message wording | `src/components/EmailPdf.tsx`, `src/lib/emailText.ts` |
 | Letterhead layout (.docx) | `src/lib/docx/buildInvoiceDocx.ts`. `LAYOUT` holds every measurement, taken from `reference/Freedom_Exteriors_Estimate_Pearson.docx`; deviations are marked `DEVIATION` |
 | Logo | `src/lib/docx/logo.ts`, taken from the reference .docx by `npm run logo` |
 | License numbers (must print on every invoice) | `MN_LICENSE` / `WI_LICENSE` in `src/lib/company.ts`; `test/docx.test.ts` fails if either is missing |
@@ -64,6 +66,20 @@ Supabase project, and no shared code or data.
 - **Make invoice**: opens `/invoices/new?fromEstimate=<id>` pre-filled. Nothing is saved and no
   invoice number is used until Create invoice; then the estimate is marked Accepted and linked to
   the invoice, and can no longer be edited.
+
+## Emailing PDFs
+
+**Email PDF** on an invoice or estimate page builds a PDF (same letterhead as the .docx, built fresh
+from the saved data, never stored) and hands it to the phone's or computer's **share menu** with a
+ready-made message. Pick Mail or Gmail, add the customer's address and send: it goes from your own
+email account, sits in your Sent folder, and replies come to you. Nothing is sent by the app itself.
+
+- Browsers that can't share files (some desktop browsers) instead download the PDF and open a new
+  email with the subject and message filled in; drag the PDF from Downloads into it.
+- Emailing a **Draft** estimate marks it **Sent**.
+- Generated invoices only. Uploaded invoices keep their original file (Download original).
+- PDFs use the built-in Times font, which covers normal English text and symbols like • — ½ é.
+  Emoji and unusual symbols are left out of the PDF (the .docx keeps them).
 
 ## Environment variables
 

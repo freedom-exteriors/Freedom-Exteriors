@@ -11,7 +11,8 @@
     "test": "vitest run",
     "logo": "node scripts/prepare-logo.mjs",
     "sample-docx": "tsx scripts/sample-docx.ts",
-    "compare-reference": "tsx scripts/compare-reference.ts"
+    "compare-reference": "tsx scripts/compare-reference.ts",
+    "sample-pdf": "tsx scripts/sample-pdf.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",
@@ -20,6 +21,7 @@
     "heic2any": "^0.0.4",
     "jszip": "^3.10.2",
     "next": "^16.3.8",
+    "pdfkit": "^0.17.2",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "server-only": "^0.0.1",
@@ -27,6 +29,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.4",
+    "@types/pdfkit": "^0.17.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "tsx": "^4.23.15",

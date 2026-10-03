@@ -6,6 +6,8 @@ import { estimateToForm, scopeLines, STATUS_LABEL, type EstimateFormInput, type 
 import { formatCents, formatPercent, formatQuantity, parsePercentHundredths } from "@/lib/money";
 import { addDays, toLongDate, toUsDate } from "@/lib/dates";
 import { api, openSigned } from "@/lib/clientApi";
+import { EmailPdf } from "@/components/EmailPdf";
+import { estimateEmail } from "@/lib/emailText";
 
 type Loaded = { estimate: EstimateRow; invoiceNumber: string | null };
 
@@ -24,7 +26,7 @@ export default function EstimateDetail({ params }: { params: Promise<{ id: strin
   useEffect(load, [load]);
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get("created")) {
-      setNotice("Estimate saved. Click Download .docx to get the Word file.");
+      setNotice("Estimate saved. Use Email PDF to send it to the customer, or Download .docx for the Word file.");
       window.history.replaceState(null, "", `/estimates/${id}`);
     }
   }, [id]);
@@ -104,7 +106,18 @@ export default function EstimateDetail({ params }: { params: Promise<{ id: strin
 
       <div className="card">
         <div className="actions" style={{ marginTop: 0 }}>
-          <button disabled={busy} onClick={() => run(() => openSigned(`/api/estimates/${id}/download`))}>Download .docx</button>
+          {e.status !== "void" && (
+            <EmailPdf
+              pdfUrl={`/api/estimates/${id}/pdf?v=${encodeURIComponent(e.updated_at)}`}
+              fileName={`${e.estimate_number}.pdf`}
+              message={estimateEmail(e)}
+              onShared={() => {
+                // Emailed a draft: it's been sent now.
+                if (e.status === "draft") setStatus("sent");
+              }}
+            />
+          )}
+          <button className="secondary" disabled={busy} onClick={() => run(() => openSigned(`/api/estimates/${id}/download`))}>Download .docx</button>
           {!locked && <button className="secondary" disabled={busy} onClick={startEdit}>Edit</button>}
           {e.invoice_id ? (
             <Link className="btn" href={`/invoices/${e.invoice_id}`}>Open invoice {invoiceNumber ?? ""}</Link>
