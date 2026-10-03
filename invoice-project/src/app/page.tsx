@@ -96,7 +96,7 @@ function Catalog() {
     <>
       <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
         <h1 style={{ marginRight: "auto" }}>Invoice catalog</h1>
-        <a className="btn secondary" href={`/api/export?${query}`}>Export CSV (QuickBooks)</a>
+        <a className="btn secondary" href={`/api/export?${query}`} title="QuickBooks Online import file. Easier: open an invoice and use Send to QuickBooks.">Export CSV (QuickBooks import)</a>
       </div>
 
       <div className="card filters">
@@ -169,7 +169,10 @@ function Catalog() {
                 <td>{toUsDate(r.invoice_date)}</td>
                 <td className="num">{formatCents(r.contract_total_cents + r.change_orders_total_cents)}</td>
                 <td className="num">{formatCents(r.balance_due_cents)}</td>
-                <td><span className={`pill ${r.status}`}>{r.status === "paid" ? `Paid ${toUsDate(r.paid_date)}` : r.status[0].toUpperCase() + r.status.slice(1)}</span></td>
+                <td>
+                  <span className={`pill ${r.status}`}>{r.status === "paid" ? `Paid ${toUsDate(r.paid_date)}` : r.status[0].toUpperCase() + r.status.slice(1)}</span>
+                  {r.qb_doc_number && <span className="pill qb" style={{ marginLeft: 6 }} title="In QuickBooks">QB</span>}
+                </td>
                 <td><span className="pill src">{r.source === "generated" ? "Generated" : "Uploaded"}</span></td>
                 <td>
                   {r.status !== "void" && (

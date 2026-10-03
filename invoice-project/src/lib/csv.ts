@@ -1,24 +1,33 @@
-// QuickBooks-style invoice CSV: one row per line item, invoice-level fields
-// repeated on every row. See docs/field-mapping.md.
+// QuickBooks Online invoice-import CSV: one row per line, invoice fields
+// repeated on every row. See docs/field-mapping.md. "Send to QuickBooks" on
+// an invoice is the easier path; this file is the by-hand alternative.
 
-import { centsToPlain, formatPercent, formatQuantity, parsePercentHundredths } from "./money";
+import { centsToPlain, formatQuantity } from "./money";
 import { toUsDate } from "./dates";
-import { quantityToMilli, type InvoiceRow, type LineItemRow } from "./invoice";
+import type { InvoiceRow, LineItemRow } from "./invoice";
+import { QB_SERVICE_ITEM, qbLinesFor, type QbLine } from "./qbLines";
 
+// Column names exactly as in QuickBooks Online's own invoice-import sample
+// file, so the import maps them without any matching by hand.
 export const CSV_COLUMNS = [
+  "InvoiceNo",
   "Customer",
-  "Invoice No.",
-  "Invoice Date",
-  "Due Date",
+  "InvoiceDate",
+  "DueDate",
   "Terms",
-  "Item/Description",
-  "Qty",
-  "Rate",
-  "Amount",
-  "Balance",
   "Memo",
-  "Status",
+  "Item(Product/Service)",
+  "ItemDescription",
+  "ItemQuantity",
+  "ItemRate",
+  "ItemAmount",
 ] as const;
+
+/** QuickBooks' own terms; anything else is left blank rather than rejected. */
+const QB_TERMS = new Set(["Due on receipt", "Net 15", "Net 30", "Net 60"]);
+
+/** QuickBooks imports at most 100 invoices per file. */
+export const QB_IMPORT_MAX_INVOICES = 100;
 
 /** Escape one CSV cell, neutralizing spreadsheet formulas. */
 export function csvCell(value: string | number | null | undefined): string {
@@ -31,65 +40,55 @@ export function csvCell(value: string | number | null | undefined): string {
   return s;
 }
 
-/** Money cells are numbers we produced ourselves, so a leading "-" is safe. */
-function moneyCell(cents: number | null | undefined): string {
-  return centsToPlain(cents ?? 0);
+export function invoiceCsvLines(inv: InvoiceRow, items: LineItemRow[]): string[][] {
+  // Same lines as "Send to QuickBooks". The import needs an amount on every
+  // row, so text-only lines (no price) ride along in the next priced line's
+  // description (or the last one, if they come at the end).
+  const rows: QbLine[] = [];
+  let pending: string[] = [];
+  for (const l of qbLinesFor(inv, items)) {
+    if (l.amountCents === null) {
+      pending.push(l.description);
+      continue;
+    }
+    rows.push(pending.length ? { ...l, description: `${pending.join("; ")}; ${l.description}` } : l);
+    pending = [];
+  }
+  if (pending.length && rows.length) {
+    const last = rows[rows.length - 1];
+    rows[rows.length - 1] = { ...last, description: `${last.description}; ${pending.join("; ")}` };
+  }
+  const exact = (l: QbLine) => l.qtyMilli !== null && l.rateCents !== null && l.qtyMilli * l.rateCents === (l.amountCents ?? 0) * 1000;
+  return rows.map((l) => [
+    csvCell(inv.invoice_number),
+    csvCell(inv.customer_name),
+    toUsDate(inv.invoice_date),
+    toUsDate(inv.due_date ?? inv.invoice_date), // QuickBooks requires a due date
+    inv.terms && QB_TERMS.has(inv.terms) ? inv.terms : "",
+    csvCell(inv.job_address ? `Job site: ${inv.job_address}` : ""),
+    QB_SERVICE_ITEM,
+    csvCell(l.description),
+    exact(l) ? formatQuantity(l.qtyMilli!).replace(/,/g, "") : "1",
+    exact(l) ? centsToPlain(l.rateCents) : centsToPlain(l.amountCents),
+    centsToPlain(l.amountCents),
+  ]);
 }
 
-const STATUS_LABEL = { outstanding: "Outstanding", paid: "Paid", void: "Void" } as const;
-
-export function invoiceCsvLines(inv: InvoiceRow, items: LineItemRow[]): string[][] {
-  const lines: Array<{ desc: string; qty: string; rate: string; cents: number }> = [];
-  const byKind = (k: LineItemRow["kind"]) =>
-    items.filter((i) => i.kind === k).sort((a, b) => a.sort_order - b.sort_order);
-
-  // Cost lines (qty x rate), then overhead/profit if used. If an uploaded
-  // invoice has no priced lines, one "Contract total" row stands in.
-  const costLines = byKind("contract_item").filter((i) => i.amount_cents !== null);
-  if (costLines.length) {
-    for (const i of costLines) {
-      const milli = quantityToMilli(i.quantity);
-      lines.push({
-        desc: i.detail ? `${i.description} - ${i.detail}` : i.description,
-        qty: milli === null ? "" : formatQuantity(milli).replace(/,/g, ""),
-        rate: i.rate_cents === null ? "" : centsToPlain(i.rate_cents),
-        cents: i.amount_cents!,
-      });
-    }
-    const pct = (v: number | string | null) => (v === null ? null : parsePercentHundredths(String(v)));
-    const oh = pct(inv.overhead_percent);
-    const pr = pct(inv.profit_percent);
-    if (oh) lines.push({ desc: `Overhead (${formatPercent(oh)})`, qty: "", rate: "", cents: inv.overhead_cents });
-    if (pr) lines.push({ desc: `Profit (${formatPercent(pr)})`, qty: "", rate: "", cents: inv.profit_cents });
-  } else {
-    const desc = inv.contract_date ? `Contract total (agreement dated ${toUsDate(inv.contract_date)})` : "Contract total";
-    lines.push({ desc, qty: "", rate: "", cents: inv.contract_total_cents });
-  }
-  for (const c of byKind("change_order")) lines.push({ desc: `Change order: ${c.description}`, qty: "", rate: "", cents: c.amount_cents ?? 0 });
-  for (const d of byKind("deposit")) {
-    const when = d.line_date ? ` ${toUsDate(d.line_date)}` : "";
-    lines.push({ desc: `Deposit received${when}${d.description ? ` - ${d.description}` : ""}`, qty: "", rate: "", cents: -(d.amount_cents ?? 0) });
-  }
-
-  return lines.map((l) => [
-    csvCell(inv.customer_name),
-    csvCell(inv.invoice_number),
-    toUsDate(inv.invoice_date),
-    toUsDate(inv.due_date),
-    csvCell(inv.terms),
-    csvCell(l.desc),
-    l.qty,
-    l.rate,
-    moneyCell(l.cents),
-    moneyCell(inv.balance_due_cents),
-    csvCell(inv.job_address),
-    STATUS_LABEL[inv.status],
-  ]);
+/**
+ * Invoices that can go into a QuickBooks import file: not void, not already
+ * in QuickBooks (it would be a duplicate), and with a total above $0
+ * (QuickBooks can't import negative or empty invoices).
+ */
+export function importable(inv: InvoiceRow): boolean {
+  return inv.status !== "void" && !inv.qb_invoice_id && inv.contract_total_cents + inv.change_orders_total_cents > 0;
 }
 
 export function buildCsv(rows: Array<{ invoice: InvoiceRow; items: LineItemRow[] }>): string {
   const out = [CSV_COLUMNS.map(csvCell).join(",")];
-  for (const r of rows) for (const line of invoiceCsvLines(r.invoice, r.items)) out.push(line.join(","));
+  for (const r of rows) {
+    if (!importable(r.invoice)) continue;
+    for (const line of invoiceCsvLines(r.invoice, r.items)) out.push(line.join(","));
+  }
   // BOM so Excel opens UTF-8 correctly; CRLF per RFC 4180.
-  return "﻿" + out.join("\r\n") + "\r\n";
+  return "\uFEFF" + out.join("\r\n") + "\r\n";
 }

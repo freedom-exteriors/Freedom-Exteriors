@@ -20,6 +20,7 @@ export function emptyForm(): InvoiceFormInput {
   return {
     customerName: "",
     customerPhone: "",
+    customerEmail: "",
     customerAddress: "",
     jobAddress: "",
     subtitle: "",
@@ -142,7 +143,7 @@ export function InvoiceForm({ mode, initial, flags = {}, submitLabel, busy, onSu
       <input
         type={o.type ?? "text"}
         className={flagCls(flag)}
-        value={form[key] as string}
+        value={(form[key] as string | undefined) ?? ""}
         placeholder={o.placeholder}
         required={o.required}
         onChange={(e) => set(key, e.target.value as never)}
@@ -158,6 +159,7 @@ export function InvoiceForm({ mode, initial, flags = {}, submitLabel, busy, onSu
         <div className="grid2">
           {field("Customer name *", "customerName", "customer_name", { required: true })}
           {field("Customer phone", "customerPhone", "customer_phone")}
+          {field("Customer email (for QuickBooks and emailing the PDF)", "customerEmail", "customer_email", { type: "email", placeholder: "name@example.com" })}
           {field("Customer mailing address (leave blank if same as job site)", "customerAddress", "customer_address", { full: true, placeholder: "PO Box 12, Stillwater, MN 55082" })}
           {field("Job site address", "jobAddress", "job_address", { full: true, placeholder: "123 Oak St, Stillwater, MN 55082" })}
           {field("Subtitle (job description under INVOICE)", "subtitle", "subtitle", { full: true, placeholder: "Full roof replacement: GAF Timberline HDZ" })}

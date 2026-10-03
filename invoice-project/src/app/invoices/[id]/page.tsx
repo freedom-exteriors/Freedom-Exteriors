@@ -32,8 +32,9 @@ export default function InvoiceDetail({ params }: { params: Promise<{ id: string
     setError("");
     setNotice("");
     try {
-      await fn();
-      if (done) setNotice(done);
+      const out = await fn();
+      if (typeof out === "string") setNotice(out);
+      else if (done) setNotice(done);
       load();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -51,7 +52,27 @@ export default function InvoiceDetail({ params }: { params: Promise<{ id: string
   }
 
   const setStatus = (status: InvoiceRow["status"], extra: Record<string, string> = {}) =>
-    run(() => api(`/api/invoices/${id}/status`, { method: "POST", json: { status, ...extra } }), "Status updated.");
+    run(async () => {
+      const r = await api<{ qbNote?: string | null }>(`/api/invoices/${id}/status`, { method: "POST", json: { status, ...extra } });
+      return r.qbNote ? `Status updated. ${r.qbNote}` : "Status updated.";
+    });
+
+  async function sendToQuickBooks(inv: InvoiceRow, depositCount: number) {
+    const warning =
+      inv.status === "paid"
+        ? `${inv.invoice_number} is marked PAID. Sending it puts the sale AND its payments into QuickBooks, dated ${toLongDate(inv.invoice_date)}. Only do this if this job isn't in your books already.\n\nSend it?`
+        : `Send ${inv.invoice_number} (${inv.customer_name}, ${formatCents(inv.contract_total_cents + inv.change_orders_total_cents)}) to QuickBooks?` +
+          (depositCount ? `\n\nThe ${depositCount} deposit${depositCount === 1 ? "" : "s"} will be recorded as payment${depositCount === 1 ? "" : "s"}, so QuickBooks shows a balance of ${formatCents(inv.balance_due_cents)}.` : "") +
+          `\n\nAfter this, changes are made in QuickBooks, not here.`;
+    if (!confirm(warning)) return;
+    await run(async () => {
+      const r = await api<{ docNumber: string; created: boolean; paymentsRecorded: number; paymentsSkipped: number }>(`/api/invoices/${id}/quickbooks`, { method: "POST" });
+      let msg = r.created ? `Sent to QuickBooks as ${r.docNumber}.` : `${r.docNumber} was already in QuickBooks, so it's now linked here (nothing duplicated).`;
+      if (r.paymentsRecorded) msg += ` ${r.paymentsRecorded} payment${r.paymentsRecorded === 1 ? "" : "s"} recorded.`;
+      if (r.paymentsSkipped) msg += ` QuickBooks already had payments on it, so ${r.paymentsSkipped} deposit${r.paymentsSkipped === 1 ? " was" : "s were"} not added again; check them in QuickBooks.`;
+      return msg;
+    });
+  }
 
   if (error && !data) return <div className="alert error">{error}</div>;
   if (!data) return <p className="muted">Loading…</p>;
@@ -95,11 +116,11 @@ export default function InvoiceDetail({ params }: { params: Promise<{ id: string
       <div className="card">
         <div className="actions" style={{ marginTop: 0 }}>
           {inv.status !== "void" && (
-            <EmailPdf pdfUrl={`/api/invoices/${id}/pdf?v=${encodeURIComponent(inv.updated_at)}`} fileName={`${inv.invoice_number}.pdf`} message={invoiceEmail(inv)} />
+            <EmailPdf pdfUrl={`/api/invoices/${id}/pdf?v=${encodeURIComponent(inv.updated_at)}`} fileName={`${inv.invoice_number}.pdf`} message={invoiceEmail(inv)} to={inv.customer_email} />
           )}
           {hasFile && <button className="secondary" onClick={() => run(() => openSigned(`/api/invoices/${id}/download`))}>{inv.source === "generated" ? "Download .docx" : "Download original"}</button>}
           {inv.source === "generated" && <button className="secondary" disabled={busy} onClick={() => run(() => api(`/api/invoices/${id}/rebuild`, { method: "POST" }), "Word file rebuilt.")}>Rebuild .docx</button>}
-          {inv.status !== "void" && <button className="secondary" onClick={() => setEditing(true)}>Edit</button>}
+          {inv.status !== "void" && !inv.qb_invoice_id && <button className="secondary" onClick={() => setEditing(true)}>Edit</button>}
           {inv.status === "outstanding" && (
             <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
               <input type="date" value={paidDate} onChange={(e) => setPaidDate(e.target.value)} style={{ width: 160 }} aria-label="Paid date" />
@@ -107,7 +128,7 @@ export default function InvoiceDetail({ params }: { params: Promise<{ id: string
             </span>
           )}
           {inv.status === "paid" && <button className="secondary" disabled={busy} onClick={() => setStatus("outstanding")}>Mark unpaid</button>}
-          {inv.status !== "void" ? (
+          {inv.status !== "void" && !inv.qb_invoice_id ? (
             <button
               className="danger"
               disabled={busy}
@@ -117,16 +138,44 @@ export default function InvoiceDetail({ params }: { params: Promise<{ id: string
             >
               Void
             </button>
-          ) : (
+          ) : inv.status === "void" ? (
             <button className="secondary" disabled={busy} onClick={() => setStatus("outstanding")}>Restore (un-void)</button>
-          )}
+          ) : null}
         </div>
+      </div>
+
+      <div className="card">
+        <h2 style={{ marginTop: 0 }}>QuickBooks</h2>
+        {inv.qb_invoice_id ? (
+          <>
+            <p style={{ marginTop: 0 }}>
+              In QuickBooks as <strong>{inv.qb_doc_number}</strong>
+              {inv.qb_sent_at && <> since {toLongDate(inv.qb_sent_at.slice(0, 10))}</>}.{" "}
+              {inv.qb_link && <a href={inv.qb_link} target="_blank" rel="noopener noreferrer">Open in QuickBooks ↗</a>}
+            </p>
+            <p className="muted small" style={{ marginBottom: 0 }}>
+              Locked here so the two can&apos;t disagree: make changes or void it in QuickBooks. Mark paid still works and records the payment in QuickBooks.
+            </p>
+          </>
+        ) : inv.status === "void" ? (
+          <p className="muted" style={{ margin: 0 }}>Void invoices aren&apos;t sent to QuickBooks.</p>
+        ) : (
+          <>
+            <p className="muted small" style={{ marginTop: 0 }}>
+              Creates this invoice in QuickBooks with the same number and lines
+              {kind("deposit").length > 0 && ", and records the deposits as payments"}. Sending twice never makes a duplicate.
+              {!inv.customer_email && " Tip: add the customer's email (Edit) first so QuickBooks has it."}
+            </p>
+            <button disabled={busy} onClick={() => sendToQuickBooks(inv, kind("deposit").length)}>Send to QuickBooks</button>
+          </>
+        )}
       </div>
 
       <div className="card">
         <dl className="fields">
           <dt>Customer</dt><dd>{inv.customer_name}</dd>
           <dt>Phone</dt><dd>{inv.customer_phone || "-"}</dd>
+          <dt>Email</dt><dd>{inv.customer_email || "-"}</dd>
           <dt>Mailing address</dt><dd>{inv.customer_address || "Same as job site"}</dd>
           <dt>Job site</dt><dd>{inv.job_address || "-"}</dd>
           <dt>Subtitle</dt><dd>{inv.subtitle || "-"} {inv.tag && <strong style={{ color: "#b88700" }}>· {inv.tag}</strong>}</dd>

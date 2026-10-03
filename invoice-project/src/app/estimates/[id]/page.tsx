@@ -111,6 +111,7 @@ export default function EstimateDetail({ params }: { params: Promise<{ id: strin
               pdfUrl={`/api/estimates/${id}/pdf?v=${encodeURIComponent(e.updated_at)}`}
               fileName={`${e.estimate_number}.pdf`}
               message={estimateEmail(e)}
+              to={e.customer_email}
               onShared={() => {
                 // Emailed a draft: it's been sent now.
                 if (e.status === "draft") setStatus("sent");
@@ -157,6 +158,7 @@ export default function EstimateDetail({ params }: { params: Promise<{ id: strin
         <dl className="fields">
           <dt>Customer</dt><dd>{e.customer_name}</dd>
           {e.customer_phone && <><dt>Phone</dt><dd>{e.customer_phone}</dd></>}
+          {e.customer_email && <><dt>Email</dt><dd>{e.customer_email}</dd></>}
           {e.customer_address && <><dt>Mailing address</dt><dd>{e.customer_address}</dd></>}
           {e.job_address && <><dt>Job site</dt><dd>{e.job_address}</dd></>}
           {e.subtitle && <><dt>Subtitle</dt><dd>{e.subtitle}</dd></>}

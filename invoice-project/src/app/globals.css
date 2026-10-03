@@ -149,3 +149,4 @@ label.check input { width: 18px; height: 18px; margin: 1px 0 0; flex: none; acce
   .pb-head { display: none; }
   .checks { grid-template-columns: 1fr; }
 }
+.pill.qb { background: #e7f5e4; color: #2ca01c; }

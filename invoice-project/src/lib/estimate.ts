@@ -13,7 +13,7 @@ import {
 } from "./money";
 import { addDays, isIsoDate, todayIso } from "./dates";
 import { COMPANY } from "./company";
-import type { InvoiceFormInput } from "./invoice";
+import { cleanCrmJobId, cleanEmail, type InvoiceFormInput } from "./invoice";
 
 export type EstimateStatus = "draft" | "sent" | "accepted" | "declined" | "void";
 export const ESTIMATE_STATUSES: EstimateStatus[] = ["draft", "sent", "accepted", "declined", "void"];
@@ -52,6 +52,8 @@ export interface EstimateLineInput {
 export interface EstimateFormInput {
   customerName: string;
   customerPhone: string;
+  customerEmail?: string;
+  crmJobId?: number | null;
   customerAddress: string;
   jobAddress: string;
   subtitle: string;
@@ -80,6 +82,8 @@ export interface EstimateItem {
 export interface CleanEstimate {
   customer_name: string;
   customer_phone: string | null;
+  customer_email: string | null;
+  crm_job_id: number | null;
   customer_address: string | null;
   job_address: string | null;
   subtitle: string | null;
@@ -180,6 +184,7 @@ export function validateEstimateInput(body: unknown): { ok: true; value: CleanEs
     if (h === null) errors.push(`${label} must be a percent between 0 and 100 ("${text}").`);
     return h || null;
   };
+  const customer_email = cleanEmail(b.customerEmail, errors);
   const overheadH = percent("Overhead", b.overheadPercent);
   const profitH = percent("Profit", b.profitPercent);
 
@@ -191,6 +196,8 @@ export function validateEstimateInput(body: unknown): { ok: true; value: CleanEs
     value: {
       customer_name,
       customer_phone: str(b.customerPhone) || null,
+      customer_email,
+      crm_job_id: cleanCrmJobId(b.crmJobId),
       customer_address: str(b.customerAddress, LIMITS.longText) || null,
       job_address: str(b.jobAddress, LIMITS.longText) || null,
       subtitle: str(b.subtitle) || null,
@@ -225,6 +232,8 @@ export function estimateToForm(e: EstimateRow): EstimateFormInput {
   return {
     customerName: e.customer_name,
     customerPhone: e.customer_phone ?? "",
+    customerEmail: e.customer_email ?? "",
+    crmJobId: e.crm_job_id ?? null,
     customerAddress: e.customer_address ?? "",
     jobAddress: e.job_address ?? "",
     subtitle: e.subtitle ?? "",
@@ -254,6 +263,8 @@ export function estimateToInvoiceForm(e: EstimateRow, today = todayIso()): Invoi
   return {
     customerName: e.customer_name,
     customerPhone: e.customer_phone ?? "",
+    customerEmail: e.customer_email ?? "",
+    crmJobId: e.crm_job_id ?? null,
     customerAddress: e.customer_address ?? "",
     jobAddress: e.job_address ?? "",
     subtitle: e.subtitle ?? "",

@@ -24,6 +24,7 @@ export function emptyEstimate(): EstimateFormInput {
   return {
     customerName: "",
     customerPhone: "",
+    customerEmail: "",
     customerAddress: "",
     jobAddress: "",
     subtitle: "",
@@ -128,7 +129,7 @@ export function EstimateBuilder({ initial, priceBook, submitLabel, busy, onSubmi
   const input = (label: string, key: keyof EstimateFormInput, o: { placeholder?: string; full?: boolean; required?: boolean; type?: string } = {}) => (
     <div style={o.full ? { gridColumn: "1 / -1" } : undefined}>
       <label>{label}</label>
-      <input type={o.type ?? "text"} value={form[key] as string} placeholder={o.placeholder} required={o.required} onChange={(e) => set(key, e.target.value as never)} />
+      <input type={o.type ?? "text"} value={(form[key] as string | undefined) ?? ""} placeholder={o.placeholder} required={o.required} onChange={(e) => set(key, e.target.value as never)} />
     </div>
   );
 
@@ -139,6 +140,7 @@ export function EstimateBuilder({ initial, priceBook, submitLabel, busy, onSubmi
         <div className="grid2">
           {input("Customer name *", "customerName", { required: true })}
           {input("Customer phone", "customerPhone")}
+          {input("Customer email (for emailing the PDF)", "customerEmail", { type: "email", placeholder: "name@example.com" })}
           {input("Customer mailing address (leave blank if same as job site)", "customerAddress", { full: true })}
           {input("Job site address", "jobAddress", { full: true, placeholder: "123 Oak St, Stillwater, MN 55082" })}
           {input("Subtitle (job description under the title)", "subtitle", { full: true, placeholder: "Full roof replacement: GAF Timberline HDZ" })}

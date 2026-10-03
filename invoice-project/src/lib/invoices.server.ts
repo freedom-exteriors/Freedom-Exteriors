@@ -2,6 +2,9 @@ import "server-only";
 import { BUCKET, nextInvoiceNumber, supabaseAdmin } from "./supabaseAdmin";
 import { buildInvoiceDocx } from "./docx/buildInvoiceDocx";
 import { docxFromInvoice } from "./docx/fromInvoice";
+import { crmCall, CrmError } from "./crm.server";
+import { qbLinesFor, qbPaymentsFor } from "./qbLines";
+import { todayIso } from "./dates";
 import {
   invoiceColumns,
   parseOurNumber,
@@ -22,6 +25,17 @@ function isDuplicateNumber(err: { code?: string; message?: string } | null): boo
 
 async function saveInvoiceRpc(id: string | null, invoice: Record<string, unknown>, items: LineItemRow[]) {
   return supabaseAdmin().rpc("save_invoice", { p_id: id, p_invoice: invoice, p_items: items });
+}
+
+/** Thrown for changes that aren't allowed (e.g. editing an invoice already in QuickBooks). */
+export class InvoiceLockedError extends Error {}
+
+/** customer_email / crm_job_id are saved here: save_invoice() doesn't know them. */
+async function saveLinks(id: string, clean: CleanInvoice, keepJob = false) {
+  const patch: Record<string, unknown> = { customer_email: clean.customer_email };
+  if (clean.crm_job_id !== null || !keepJob) patch.crm_job_id = clean.crm_job_id;
+  const { error } = await supabaseAdmin().from("invoices").update(patch).eq("id", id);
+  if (error) throw new Error(error.message);
 }
 
 export async function loadInvoice(id: string): Promise<{ invoice: InvoiceRow; items: LineItemRow[] } | null> {
@@ -66,6 +80,7 @@ export async function createGeneratedInvoice(clean: CleanInvoice): Promise<{ id:
     );
     if (isDuplicateNumber(error)) continue;
     if (error || typeof id !== "string") throw new Error(error?.message ?? "Save failed");
+    await saveLinks(id, clean);
 
     let docxError: string | null = null;
     try {
@@ -137,6 +152,7 @@ export async function createUploadedInvoice(u: UploadedSave): Promise<{ id: stri
     );
     if (isDuplicateNumber(error)) continue;
     if (error || typeof id !== "string") throw new Error(error?.message ?? "Save failed");
+    await saveLinks(id, u.clean);
     return { id, invoiceNumber, duplicate };
   }
   throw new Error("Could not find a free invoice number for this document.");
@@ -147,8 +163,12 @@ export async function createUploadedInvoice(u: UploadedSave): Promise<{ id: stri
 export async function updateInvoice(id: string, clean: CleanInvoice): Promise<{ docxError: string | null }> {
   const loaded = await loadInvoice(id);
   if (!loaded) throw new Error("Invoice not found");
+  if (loaded.invoice.qb_invoice_id) {
+    throw new InvoiceLockedError(`This invoice is already in QuickBooks (${loaded.invoice.qb_doc_number}), so it can't be changed here. Make the change in QuickBooks.`);
+  }
   const { error } = await saveInvoiceRpc(id, invoiceColumns(clean), clean.items);
   if (error) throw new Error(error.message);
+  await saveLinks(id, clean, true);
   if (loaded.invoice.source === "uploaded") {
     const prior = Array.isArray(loaded.invoice.extraction_warnings) ? (loaded.invoice.extraction_warnings as string[]) : [];
     const kept = prior.filter((w) => !w.startsWith("Totals don't reconcile"));
@@ -166,6 +186,24 @@ export async function updateInvoice(id: string, clean: CleanInvoice): Promise<{ 
 }
 
 export async function setStatus(id: string, status: InvoiceStatus, paidDate: string | null) {
+  const loaded = await loadInvoice(id);
+  if (!loaded) return null;
+  const inv = loaded.invoice;
+  let qbNote: string | null = null;
+  if (inv.qb_invoice_id && status !== inv.status) {
+    if (status === "void") throw new InvoiceLockedError(`This invoice is in QuickBooks (${inv.qb_doc_number}). Void it in QuickBooks first, then here.`);
+    if (inv.status === "paid") throw new InvoiceLockedError(`This invoice's payment is in QuickBooks (${inv.qb_doc_number}). Delete that payment in QuickBooks to un-pay it.`);
+    if (status === "paid" && inv.balance_due_cents > 0) {
+      // Record the final payment in QuickBooks first; only then mark it paid here.
+      const r = await crmCall<{ recorded: boolean; alreadyPaid?: boolean; amountCents?: number }>("tool-payment", {
+        docNumber: inv.qb_doc_number,
+        date: paidDate ?? todayIso(),
+        amountCents: inv.balance_due_cents,
+        note: "Final payment",
+      });
+      qbNote = r.recorded ? "Payment recorded in QuickBooks." : "QuickBooks already shows this invoice as paid.";
+    }
+  }
   const { data, error } = await supabaseAdmin()
     .from("invoices")
     .update({ status, paid_date: status === "paid" ? paidDate : null })
@@ -173,8 +211,51 @@ export async function setStatus(id: string, status: InvoiceStatus, paidDate: str
     .select("id, status, paid_date")
     .maybeSingle();
   if (error) throw new Error(error.message);
-  return data;
+  return data ? { ...data, qbNote } : null;
 }
+
+// ------------------------------------------------------- QuickBooks
+
+export interface QbSendResult {
+  docNumber: string;
+  link: string;
+  created: boolean;
+  paymentsRecorded: number;
+  paymentsSkipped: number;
+}
+
+/** Creates the invoice (and its deposits as payments) in QuickBooks via the CRM. */
+export async function sendInvoiceToQuickBooks(id: string): Promise<QbSendResult> {
+  const loaded = await loadInvoice(id);
+  if (!loaded) throw new InvoiceLockedError("Invoice not found");
+  const { invoice: inv, items } = loaded;
+  if (inv.status === "void") throw new InvoiceLockedError("A void invoice can't be sent to QuickBooks.");
+  if (inv.invoice_number.length > 21) throw new InvoiceLockedError(`QuickBooks invoice numbers can be at most 21 characters; "${inv.invoice_number}" is longer.`);
+  const lines = qbLinesFor(inv, items);
+  const r = await crmCall<{ invoiceId: string; docNumber: string; link: string; created: boolean; paymentsRecorded: number; paymentsSkipped: number }>("tool-invoice", {
+    docNumber: inv.invoice_number,
+    txnDate: inv.invoice_date,
+    dueDate: inv.due_date ?? inv.invoice_date,
+    customer: {
+      name: inv.customer_name,
+      email: inv.customer_email ?? "",
+      phone: inv.customer_phone ?? "",
+      address: inv.customer_address ?? inv.job_address ?? "",
+    },
+    lines: lines.map((l) => ({ description: l.description, qtyMilli: l.qtyMilli, rateCents: l.rateCents, amountCents: l.amountCents })),
+    payments: qbPaymentsFor(inv, items),
+    memo: [`From the invoice tool (${inv.source === "generated" ? "made" : "uploaded"} there).`, inv.job_address ? `Job site: ${inv.job_address}` : ""].filter(Boolean).join(" "),
+    crmJobId: inv.crm_job_id,
+  });
+  const { error } = await supabaseAdmin()
+    .from("invoices")
+    .update({ qb_invoice_id: r.invoiceId, qb_doc_number: r.docNumber ?? inv.invoice_number, qb_link: r.link, qb_sent_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) throw new Error(`It's in QuickBooks, but saving that here failed: ${error.message}`);
+  return { docNumber: r.docNumber ?? inv.invoice_number, link: r.link, created: r.created, paymentsRecorded: r.paymentsRecorded, paymentsSkipped: r.paymentsSkipped };
+}
+
+export { CrmError };
 
 // ----------------------------------------------------------- catalog
 
@@ -220,7 +301,7 @@ export async function listInvoices(f: CatalogFilters, limit = 2000): Promise<Inv
   let query = supabaseAdmin()
     .from("invoices")
     .select(
-      "id, invoice_number, invoice_number_source, duplicate_number_flag, customer_name, customer_phone, customer_address, job_address, subtitle, tag, payment_terms, contract_date, invoice_date, due_date, terms, subtotal_cents, overhead_percent, overhead_cents, profit_percent, profit_cents, contract_total_cents, deposits_total_cents, change_orders_total_cents, balance_due_cents, status, paid_date, source, original_file_path, generated_file_path, extraction_warnings, created_at, updated_at",
+      "id, invoice_number, invoice_number_source, duplicate_number_flag, customer_name, customer_phone, customer_email, crm_job_id, qb_invoice_id, qb_doc_number, qb_sent_at, customer_address, job_address, subtitle, tag, payment_terms, contract_date, invoice_date, due_date, terms, subtotal_cents, overhead_percent, overhead_cents, profit_percent, profit_cents, contract_total_cents, deposits_total_cents, change_orders_total_cents, balance_due_cents, status, paid_date, source, original_file_path, generated_file_path, extraction_warnings, created_at, updated_at",
     );
 
   const q = cleanSearch(f.q ?? "");

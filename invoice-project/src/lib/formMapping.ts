@@ -8,6 +8,8 @@ export function formFromInvoice(inv: InvoiceRow, items: LineItemRow[]): InvoiceF
   return {
     customerName: inv.customer_name,
     customerPhone: inv.customer_phone ?? "",
+    customerEmail: inv.customer_email ?? "",
+    crmJobId: inv.crm_job_id ?? null,
     customerAddress: inv.customer_address ?? "",
     jobAddress: inv.job_address ?? "",
     subtitle: inv.subtitle ?? "",

@@ -83,7 +83,8 @@ export async function serviceItem(conn) {
   if (process.env.QB_ITEM_ID) return process.env.QB_ITEM_ID;
   const res = await qb(conn, "GET", `query?query=${encodeURIComponent("select * from Item where Type = 'Service' and Active = true maxresults 50")}`);
   const items = res?.QueryResponse?.Item || [];
-  const pick = items.find(i => /roof|exterior|construction/i.test(i.Name)) || items.find(i => i.Name === "Services") || items[0];
+  // "Exterior Services" is the item the invoice tool's import file uses too.
+  const pick = items.find(i => i.Name === "Exterior Services") || items.find(i => /roof|exterior|construction/i.test(i.Name)) || items.find(i => i.Name === "Services") || items[0];
   if (!pick) throw new Error("QuickBooks has no service item to bill — add one (e.g. \"Roofing\") in QuickBooks, then try again");
   return pick.Id;
 }

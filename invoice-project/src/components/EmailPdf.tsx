@@ -7,6 +7,8 @@ interface Props {
   pdfUrl: string;
   fileName: string;
   message: EmailText;
+  /** Customer's email, used when the fallback opens a new email. */
+  to?: string | null;
   /** Called after the share menu reports the PDF was sent somewhere. */
   onShared?: () => void;
 }
@@ -31,7 +33,7 @@ function download(file: File) {
  * The PDF is fetched when the page opens, because browsers (Safari
  * especially) only allow the share menu straight after a tap.
  */
-export function EmailPdf({ pdfUrl, fileName, message, onShared }: Props) {
+export function EmailPdf({ pdfUrl, fileName, message, to, onShared }: Props) {
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
@@ -75,8 +77,8 @@ export function EmailPdf({ pdfUrl, fileName, message, onShared }: Props) {
       }
     }
     download(file);
-    window.location.href = `mailto:?subject=${encodeURIComponent(message.subject)}&body=${encodeURIComponent(message.body)}`;
-    setNote(`The PDF (${file.name}) was downloaded and a new email opened. Attach the PDF from your Downloads folder (drag it into the email), add the customer's address, and send.`);
+    window.location.href = `mailto:${to ? encodeURIComponent(to) : ""}?subject=${encodeURIComponent(message.subject)}&body=${encodeURIComponent(message.body)}`;
+    setNote(`The PDF (${file.name}) was downloaded and a new email opened. Attach the PDF from your Downloads folder (drag it into the email), ${to ? "" : "add the customer's address, "}and send.`);
   }
 
   return (

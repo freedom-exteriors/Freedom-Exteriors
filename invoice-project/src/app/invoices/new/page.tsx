@@ -4,6 +4,7 @@ import Link from "next/link";
 import { emptyForm, InvoiceForm } from "@/components/InvoiceForm";
 import type { InvoiceFormInput } from "@/lib/invoice";
 import { estimateToInvoiceForm, type EstimateRow } from "@/lib/estimate";
+import { crmJobFromUrl, customerFromCrm, type CrmJob } from "@/lib/crmClient";
 import { api, openSigned } from "@/lib/clientApi";
 
 export default function NewInvoicePage() {
@@ -15,11 +16,21 @@ export default function NewInvoicePage() {
   // The form is only pre-filled here; nothing is saved until Create.
   const [fromEstimate, setFromEstimate] = useState<{ id: string; number: string; alreadyInvoiced: boolean } | null>(null);
   const [initial, setInitial] = useState<InvoiceFormInput | null>(null);
+  const [crmJob, setCrmJob] = useState<CrmJob | null>(null);
 
   useEffect(() => {
     const estId = new URLSearchParams(window.location.search).get("fromEstimate");
     if (!estId) {
-      setInitial(emptyForm());
+      // Opened from a CRM job: fill in that customer.
+      crmJobFromUrl()
+        .then((job) => {
+          setCrmJob(job);
+          setInitial(job ? { ...emptyForm(), ...customerFromCrm(job) } : emptyForm());
+        })
+        .catch((e) => {
+          setError(`Couldn't load the CRM job (${e.message}). Starting a blank invoice.`);
+          setInitial(emptyForm());
+        });
       return;
     }
     api<{ estimate: EstimateRow }>(`/api/estimates/${encodeURIComponent(estId)}`)
@@ -81,6 +92,14 @@ export default function NewInvoicePage() {
       )}
       {fromEstimate?.alreadyInvoiced && (
         <div className="alert warn">An invoice was already made from {fromEstimate.number}. Creating another one makes a second invoice for the same job.</div>
+      )}
+      {crmJob && (
+        <div className="alert ok">
+          Filled in from the CRM job for <strong>{crmJob.name}</strong>. When you send this invoice to QuickBooks, the CRM job is marked invoiced.
+        </div>
+      )}
+      {crmJob?.qbInvoiceDocNumber && (
+        <div className="alert warn">This CRM job already has QuickBooks invoice {crmJob.qbInvoiceDocNumber}. Only create another if this is a separate bill (e.g. a supplement).</div>
       )}
       {error && <div className="alert error">{error}</div>}
       {initial ? (

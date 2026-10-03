@@ -31,6 +31,10 @@ export interface CostLineInput {
 export interface InvoiceFormInput {
   customerName: string;
   customerPhone: string;
+  /** Optional: for QuickBooks and the Email PDF message. */
+  customerEmail?: string;
+  /** Set when the invoice was started from a CRM job. */
+  crmJobId?: number | null;
   customerAddress: string;
   jobAddress: string;
   subtitle: string;
@@ -66,6 +70,9 @@ export interface LineItemRow {
 export interface CleanInvoice {
   customer_name: string;
   customer_phone: string | null;
+  /** Saved after save_invoice() runs (that function doesn't know these). */
+  customer_email: string | null;
+  crm_job_id: number | null;
   customer_address: string | null;
   job_address: string | null;
   subtitle: string | null;
@@ -97,6 +104,12 @@ export interface InvoiceRow {
   duplicate_number_flag: boolean;
   customer_name: string;
   customer_phone: string | null;
+  customer_email: string | null;
+  crm_job_id: number | null;
+  qb_invoice_id: string | null;
+  qb_doc_number: string | null;
+  qb_link: string | null;
+  qb_sent_at: string | null;
   customer_address: string | null;
   job_address: string | null;
   subtitle: string | null;
@@ -130,6 +143,23 @@ const LIMITS = { text: 300, longText: 2000, lines: 100 };
 
 function str(v: unknown, max = LIMITS.text): string {
   return typeof v === "string" ? v.trim().slice(0, max) : typeof v === "number" ? String(v) : "";
+}
+
+/** Optional email: "" → null; anything that isn't an address → error. */
+export function cleanEmail(v: unknown, errors: string[]): string | null {
+  const s = typeof v === "string" ? v.trim().slice(0, 100) : "";
+  if (!s) return null;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s)) {
+    errors.push(`Customer email "${s}" isn't a valid email address.`);
+    return null;
+  }
+  return s;
+}
+
+/** CRM job id (a positive whole number) or null. */
+export function cleanCrmJobId(v: unknown): number | null {
+  const n = typeof v === "string" ? Number(v) : v;
+  return typeof n === "number" && Number.isSafeInteger(n) && n > 0 ? n : null;
 }
 
 function arr(v: unknown): unknown[] {
@@ -294,11 +324,15 @@ export function validateInvoiceInput(
   }
 
   const paymentTerms = str(b.paymentTerms, LIMITS.longText);
+  const customer_email = cleanEmail(b.customerEmail, errors);
+  if (errors.length) return { ok: false, errors };
   return {
     ok: true,
     value: {
       customer_name,
       customer_phone: str(b.customerPhone) || null,
+      customer_email,
+      crm_job_id: cleanCrmJobId(b.crmJobId),
       customer_address: str(b.customerAddress, LIMITS.longText) || null,
       job_address: str(b.jobAddress, LIMITS.longText) || null,
       subtitle: str(b.subtitle) || null,
@@ -325,7 +359,7 @@ export function validateInvoiceInput(
 
 /** Columns for save_invoice() from a validated invoice. */
 export function invoiceColumns(v: CleanInvoice) {
-  const { items: _items, reconcileWarning: _w, ...cols } = v;
+  const { items: _items, reconcileWarning: _w, customer_email: _e, crm_job_id: _j, ...cols } = v;
   return cols;
 }
 

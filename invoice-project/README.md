@@ -67,6 +67,25 @@ Supabase project, and no shared code or data.
   invoice number is used until Create invoice; then the estimate is marked Accepted and linked to
   the invoice, and can no longer be edited.
 
+## CRM and QuickBooks
+
+The CRM (freedom-exteriors.vercel.app, repo root) owns the **one** QuickBooks connection. QuickBooks
+rotates its login tokens, so two apps with their own connections would log each other out. This
+app asks the CRM, server to server, to do QuickBooks work (`src/lib/crm.server.ts` →
+`api/quickbooks.js?action=tool-*` in the CRM).
+
+- **From the CRM:** a job's **New Estimate** / **New Invoice** buttons open this app with
+  `?crmJob=<id>`; the customer's name, phone, email and address are filled in from the job.
+- **Send to QuickBooks** (invoice page): creates the invoice in QuickBooks with the same FE-INV
+  number and lines (`src/lib/qbLines.ts`), records each deposit as a QuickBooks payment, and marks
+  the CRM job invoiced. Repeating it never duplicates anything (the CRM looks the number up first).
+  After that the invoice is locked here (edit and void happen in QuickBooks); **Mark paid** still
+  works and records the final payment in QuickBooks.
+- Lines are filed under the QuickBooks service item **Exterior Services**.
+- **Setup:** `INVOICE_TOOL_KEY` (a random 64-character secret) must be the same on this Vercel
+  project and the CRM's; `CRM_URL` is optional (defaults to https://freedom-exteriors.vercel.app).
+  QuickBooks itself is connected once, in the CRM: **QB** button in the top bar.
+
 ## Emailing PDFs
 
 **Email PDF** on an invoice or estimate page builds a PDF (same letterhead as the .docx, built fresh
@@ -93,6 +112,8 @@ Set these in **Vercel → invoice-project → Settings → Environment Variables
 | `SUPABASE_URL` | The web address of the invoice-project database, like `https://abcd1234.supabase.co`. Not secret. |
 | `SUPABASE_SERVICE_ROLE_KEY` | The master key to the invoice database. It bypasses all security rules, so it's server-only and must never be shared, pasted in chat, or put in a `NEXT_PUBLIC_` variable. Supabase → Project Settings → API Keys → `service_role` / secret key. |
 | `APP_PASSWORD` | The password you type to get into the site. At least 8 characters; use 4+ random words. |
+| `INVOICE_TOOL_KEY` | Shared secret this app uses to call the CRM (for QuickBooks and CRM jobs). Must equal the CRM project's `INVOICE_TOOL_KEY`. Nobody types it. |
+| `CRM_URL` | Optional. The CRM's web address; default `https://freedom-exteriors.vercel.app`. Not secret. |
 | `SESSION_SECRET` | A long random string the server uses to sign the login cookie so nobody can forge one. Nobody ever types it. At least 32 characters. Generate one with `openssl rand -hex 32`. |
 
 ## Rotating (changing) the password

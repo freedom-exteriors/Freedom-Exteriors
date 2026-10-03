@@ -1,52 +1,50 @@
-# Field mapping: database → QuickBooks invoice import
+# Field mapping: database → QuickBooks
 
-The CSV export (`Export CSV` on the catalog) produces one row per line item, with the invoice-level
-fields repeated on every row, which is the layout QuickBooks Online's invoice import expects.
-Dates are `MM/DD/YYYY`. Amounts are plain numbers (`1234.56`).
+There are two ways into QuickBooks Online, and both use the same lines (`src/lib/qbLines.ts`):
 
-## `invoices` table
+1. **Send to QuickBooks** on an invoice (recommended): goes through the CRM's QuickBooks connection.
+2. **Export CSV (QuickBooks import)** on the catalog: a file for QuickBooks' *Import data → Invoices*.
 
-| Database column | QuickBooks column | Notes |
+## Lines
+
+| Invoice | QuickBooks line | Amount |
 | --- | --- | --- |
-| `customer_name` | **Customer** | Must match (or will create) a QuickBooks customer. |
-| `invoice_number` | **Invoice No.** | `FE-INV-YYYY-###`, or the number printed on an uploaded document. |
-| `invoice_date` | **Invoice Date** | |
-| `due_date` | **Due Date** | |
-| `terms` | **Terms** | Worked out from the dates: `Net 30`, `Net 15`, `Due on receipt`. |
-| `balance_due_cents` | **Balance** | Cents ÷ 100. Repeated on every row of the invoice. |
-| `job_address` | **Memo** | |
-| `status` | **Status** | `Outstanding` / `Paid` / `Void`. Not a standard QuickBooks import column; delete it before importing if QuickBooks complains. |
-| `customer_phone`, `customer_address` | (not exported) | Map to the QuickBooks customer record (phone, billing address) if needed. |
-| `subtitle`, `tag`, `payment_terms` | (not exported) | Printed on the invoice only. QuickBooks has a "Message on invoice" field if you want `payment_terms` there later. |
-| `contract_date` | (in the description) | Shown as "Contract total (agreement dated MM/DD/YYYY)" when there are no cost lines. |
-| `subtotal_cents` | (sum of cost-line rows) | |
-| `overhead_percent`, `overhead_cents` | an `Overhead (10%)` row, Amount = `overhead_cents` | Only when overhead is used. |
-| `profit_percent`, `profit_cents` | a `Profit (10%)` row, Amount = `profit_cents` | Only when profit is used. |
-| `contract_total_cents` | (sum of the rows above) | Subtotal + overhead + profit. If an invoice has no cost lines (some uploads), one "Contract total" row carries it instead. |
-| `deposits_total_cents`, `change_orders_total_cents` | (sum of rows) | Exported as their individual rows below. |
-| `paid_date` | (not exported) | Record the payment in QuickBooks with this date. |
-| `id`, `invoice_number_source`, `document_invoice_number`, `duplicate_number_flag`, `source`, `original_file_path`, `generated_file_path`, `extraction_json`, `extraction_raw_response`, `extraction_warnings`, `created_at`, `updated_at` | (not exported) | Internal bookkeeping and audit trail. |
+| Cost lines, when they (plus overhead and profit) add up to the contract total | one line each: description (+ " - " + detail), Qty, Rate | `amount_cents` ÷ 100 |
+| Overhead / profit | `Overhead (10%)`, `Profit (12.5%)` | `overhead_cents`, `profit_cents` |
+| Cost lines that **don't** add up (e.g. an uploaded invoice whose lines have no prices) | text-only lines, then one `Contract total (agreement dated …)` line | contract total |
+| Change orders | `Change order: <description>` | `amount_cents` |
+| Scope bullets | not sent (printed on the PDF/.docx only) | - |
+| **Deposits** | **not lines**: each becomes a QuickBooks **payment** (Send) or must be entered as a payment by hand (CSV) | - |
 
-## `invoice_line_items` table → Item/Description + Amount
+So the QuickBooks invoice total is contract total + change orders, and after the deposits are
+applied its balance equals our balance due. QuickBooks' import rejects negative lines, which is why
+deposits are payments rather than negative lines.
 
-| `kind` | Exported as | Amount |
-| --- | --- | --- |
-| `scope` | not exported (scope bullets have no price) | - |
-| `contract_item` (cost line) | its own row. Item/Description = `description` + " - " + `detail`; **Qty** = `quantity`; **Rate** = `rate_cents` ÷ 100 | `amount_cents` ÷ 100 (= qty × rate, calculated by the server in integer cents, rounded half-up) |
-| `change_order` | `Change order: <description>` | `amount_cents` ÷ 100 |
-| `deposit` | `Deposit received MM/DD/YYYY - <description>` | **negative** `amount_cents` ÷ 100 |
+Qty × Rate is only sent when it equals the amount to the cent (QuickBooks rejects a mismatch);
+otherwise the line is Qty 1 × the amount. Every line is filed under the service item
+**Exterior Services**.
 
-Because deposits are negative rows, the Amount column of an invoice's rows adds up to its balance due.
-Qty and Rate are blank on overhead, profit, change-order and deposit rows, and on uploaded lines whose
-document showed only an amount.
+## Send to QuickBooks
 
-**Decision for later:** if you'd rather record deposits in QuickBooks as *payments* (the more
-standard way), filter out the `Deposit received` rows before importing. Then the QuickBooks invoice
-total equals contract total + change orders, and each deposit gets entered as a payment against it.
+| Invoice field | QuickBooks |
+| --- | --- |
+| `invoice_number` | Invoice no. (`DocNumber`, max 21 characters) |
+| `customer_name`, `customer_email`, `customer_phone`, `customer_address` (or `job_address`) | Customer (found by exact name, else created); email also goes on the invoice |
+| `invoice_date` / `due_date` | Invoice date / due date (due date falls back to the invoice date) |
+| `job_address` | Private note: "From the invoice tool… Job site: …" |
+| deposits (`line_date`, `amount_cents`, `description`) | Payments applied to the invoice (no date: the invoice date) |
+| status Paid | also a final payment for `balance_due_cents` on `paid_date` |
+| result | saved as `qb_invoice_id`, `qb_doc_number`, `qb_link`, `qb_sent_at`; the CRM job gets `qbInvoiceId` |
 
-CSV column order: Customer, Invoice No., Invoice Date, Due Date, Terms, Item/Description, Qty, Rate, Amount, Balance, Memo, Status.
+## CSV columns (QuickBooks' sample-file names)
 
-`line_date` is used only in the deposit description. `sort_order` keeps rows in the order you entered them.
+`InvoiceNo, Customer, InvoiceDate, DueDate, Terms, Memo, Item(Product/Service), ItemDescription,
+ItemQuantity, ItemRate, ItemAmount`. Dates `MM/DD/YYYY`; amounts plain (`1234.56`); every row has
+an amount (text-only lines are folded into the next priced line's description). `Terms` only when
+it's one of QuickBooks' own (Due on receipt, Net 15, Net 30, Net 60). Left out: void invoices,
+invoices already in QuickBooks, and invoices with no total. QuickBooks imports at most 100 invoices
+per file, and imports every invoice as **unpaid**: record deposits and payments in QuickBooks
+afterwards, or use Send to QuickBooks instead.
 
 ## `invoice_counters` table
 

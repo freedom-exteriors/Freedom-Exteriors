@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { setStatus } from "@/lib/invoices.server";
+import { CrmError, InvoiceLockedError, setStatus } from "@/lib/invoices.server";
 import { isUuid, jsonError, readJson, serverError } from "@/lib/http";
 import { isIsoDate, todayIso } from "@/lib/dates";
 
@@ -16,6 +16,8 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/invoices/[i
     if (!row) return jsonError("Not found", 404);
     return NextResponse.json(row);
   } catch (e) {
+    if (e instanceof InvoiceLockedError) return jsonError(e.message, 409);
+    if (e instanceof CrmError) return jsonError(`Not marked paid: QuickBooks didn't record the payment (${e.message}).`, 502);
     return serverError(e, "set status");
   }
 }

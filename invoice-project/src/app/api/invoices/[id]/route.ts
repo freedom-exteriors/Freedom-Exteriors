@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { validateInvoiceInput } from "@/lib/invoice";
-import { loadInvoice, updateInvoice } from "@/lib/invoices.server";
+import { InvoiceLockedError, loadInvoice, updateInvoice } from "@/lib/invoices.server";
 import { isUuid, jsonError, readJson, serverError } from "@/lib/http";
 
 export async function GET(_req: NextRequest, ctx: RouteContext<"/api/invoices/[id]">) {
@@ -27,6 +27,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/invoices/[
     const result = await updateInvoice(id, parsed.value);
     return NextResponse.json({ ok: true, ...result });
   } catch (e) {
+    if (e instanceof InvoiceLockedError) return jsonError(e.message, 409);
     return serverError(e, "update invoice");
   }
 }
