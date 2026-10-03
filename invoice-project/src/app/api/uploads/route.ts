@@ -9,7 +9,7 @@ import { jsonError, readJson, serverError } from "@/lib/http";
 // Body: { ext: "pdf" | "png" | "jpg", size: number, fileName: string }
 export async function POST(req: NextRequest) {
   const body = (await readJson(req)) as { ext?: unknown; size?: unknown } | null;
-  if (!isUploadExt(body?.ext)) return jsonError("Only PDF, PNG and JPG files are accepted.");
+  if (!isUploadExt(body?.ext)) return jsonError("Only PDF, Word (.docx), PNG and JPG files are accepted.");
   const size = Number(body?.size);
   if (!Number.isFinite(size) || size <= 0) return jsonError("The file is empty.");
   if (size > MAX_UPLOAD_BYTES) return jsonError("The file is larger than 20 MB.");

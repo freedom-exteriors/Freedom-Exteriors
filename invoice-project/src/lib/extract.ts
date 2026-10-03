@@ -1,5 +1,6 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
+import { docxToText, DocxError } from "./docxText";
 
 // Reads an uploaded invoice (PDF or image) with Claude and returns the fields
 // as structured JSON. The output is NEVER saved automatically: it only fills
@@ -131,7 +132,8 @@ export interface ExtractedInvoice {
   notes: string | null;
 }
 
-export type SupportedMime = "application/pdf" | "image/png" | "image/jpeg";
+export const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+export type SupportedMime = "application/pdf" | "image/png" | "image/jpeg" | typeof DOCX_MIME;
 
 /** Images above this size are shrunk (a copy, for reading only) before sending. */
 const IMAGE_SEND_LIMIT = 3_500_000;
@@ -150,7 +152,21 @@ export async function extractInvoice(file: Buffer, mime: SupportedMime) {
   const client = new Anthropic({ maxRetries: 2, timeout: 240_000 });
 
   let block: Anthropic.Beta.BetaContentBlockParam;
-  if (mime === "application/pdf") {
+  // Word files: Claude reads their text (tables kept as "cell | cell" rows).
+  let text: string | null = null;
+  if (mime === DOCX_MIME) {
+    try {
+      text = await docxToText(file);
+    } catch (e) {
+      if (e instanceof DocxError) throw new ExtractionError(e.message);
+      throw e;
+    }
+    block = {
+      type: "document",
+      title: "Uploaded Word document (text; table cells separated by |)",
+      source: { type: "text", media_type: "text/plain", data: text },
+    };
+  } else if (mime === "application/pdf") {
     block = { type: "document", source: { type: "base64", media_type: "application/pdf", data: file.toString("base64") } };
   } else {
     const img = await prepareImage(file, mime);
@@ -188,7 +204,7 @@ export async function extractInvoice(file: Buffer, mime: SupportedMime) {
       response.stop_reason === "max_tokens" ? "The document was too long to read in one pass." : "Claude did not return structured data for this file.",
     );
   }
-  return { fields: normalizeFields(call.input), raw: response };
+  return { fields: normalizeFields(call.input), raw: response, text };
 }
 
 /** "" (the schema's "not on the document") → null, recursively. */

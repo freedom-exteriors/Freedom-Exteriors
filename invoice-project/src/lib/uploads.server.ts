@@ -7,6 +7,7 @@ export const UPLOAD_TYPES = {
   pdf: "application/pdf",
   png: "image/png",
   jpg: "image/jpeg",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 } as const;
 export type UploadExt = keyof typeof UPLOAD_TYPES;
 
@@ -23,10 +24,12 @@ export function uploadPaths(uploadId: string, ext: UploadExt) {
   };
 }
 
-/** Check the first bytes really are a PDF / PNG / JPEG. */
+/** Check the first bytes really are a PDF / PNG / JPEG / .docx (a zip). */
 export function sniffType(buf: Buffer): UploadExt | null {
   if (buf.subarray(0, 5).toString("latin1") === "%PDF-") return "pdf";
   if (buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "png";
   if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "jpg";
+  // .docx is a zip; docxToText() then checks it really holds word/document.xml.
+  if (buf.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]))) return "docx";
   return null;
 }

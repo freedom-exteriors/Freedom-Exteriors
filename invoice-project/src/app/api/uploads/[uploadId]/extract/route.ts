@@ -25,10 +25,10 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/uploads/[up
     if (buf.length > MAX_UPLOAD_BYTES) return jsonError("The file is larger than 20 MB.");
     const actual = sniffType(buf);
     if (actual !== ext) {
-      return jsonError("This file isn't a real PDF, PNG or JPG (its contents don't match its type).");
+      return jsonError("This file isn't a real PDF, PNG, JPG or Word .docx file (its contents don't match its type).");
     }
 
-    const { fields, raw } = await extractInvoice(buf, UPLOAD_TYPES[ext]);
+    const { fields, raw, text } = await extractInvoice(buf, UPLOAD_TYPES[ext]);
     const audit = {
       uploadId,
       fileName: typeof body.fileName === "string" ? body.fileName.slice(0, 200) : null,
@@ -36,13 +36,15 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/uploads/[up
       extractedAt: new Date().toISOString(),
       fields,
       raw,
+      documentText: text, // Word files: exactly what Claude was given
     };
     const up = await db.storage
       .from(BUCKET)
       .upload(paths.extraction, Buffer.from(JSON.stringify(audit)), { contentType: "application/json", upsert: true });
     if (up.error) throw new Error(`Saving the extraction record failed: ${up.error.message}`);
 
-    return NextResponse.json({ draft: draftFromExtraction(fields) });
+    // Browsers can't display a .docx, so the review screen shows its text.
+    return NextResponse.json({ draft: draftFromExtraction(fields), previewText: text });
   } catch (e) {
     if (e instanceof ExtractionError) return jsonError(e.message, 422);
     return serverError(e, "extract");

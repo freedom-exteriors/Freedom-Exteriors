@@ -7,16 +7,19 @@ import type { ReviewDraft } from "@/lib/review";
 import { api } from "@/lib/clientApi";
 
 const MAX_BYTES = 20 * 1024 * 1024;
-type Ext = "pdf" | "png" | "jpg";
+type Ext = "pdf" | "png" | "jpg" | "docx";
+const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 type Stage =
   | { name: "pick" }
   | { name: "working"; message: string }
-  | { name: "review"; uploadId: string; ext: Ext; fileName: string; viewUrl: string; draft: ReviewDraft }
+  | { name: "review"; uploadId: string; ext: Ext; fileName: string; viewUrl: string; draft: ReviewDraft; previewText: string | null }
   | { name: "saved"; id: string; invoiceNumber: string; duplicate: boolean };
 
-function extOf(file: File): Ext | "heic" | null {
+function extOf(file: File): Ext | "heic" | "doc" | null {
   const name = file.name.toLowerCase();
+  if (file.type === DOCX_MIME || name.endsWith(".docx")) return "docx";
+  if (name.endsWith(".doc")) return "doc";
   if (file.type === "application/pdf" || name.endsWith(".pdf")) return "pdf";
   if (file.type === "image/png" || name.endsWith(".png")) return "png";
   if (file.type === "image/jpeg" || /\.jpe?g$/.test(name)) return "jpg";
@@ -44,7 +47,11 @@ export default function UploadPage() {
     let ext = extOf(original);
     let file = original;
     if (ext === null) {
-      setError(`"${original.name}" isn't a PDF, PNG, JPG or HEIC file. Save or export it as a PDF and try again.`);
+      setError(`"${original.name}" isn't a PDF, Word (.docx), PNG, JPG or HEIC file. Save or export it as a PDF and try again.`);
+      return;
+    }
+    if (ext === "doc") {
+      setError(`"${original.name}" is an old-style Word file (.doc). Open it in Word, choose File → Save As → Word Document (.docx) or PDF, and upload that.`);
       return;
     }
     try {
@@ -67,19 +74,22 @@ export default function UploadPage() {
       });
       const put = await fetch(signedUrl, {
         method: "PUT",
-        headers: { "Content-Type": file.type || (ext === "pdf" ? "application/pdf" : ext === "png" ? "image/png" : "image/jpeg"), "x-upsert": "false" },
+        headers: {
+          "Content-Type": { pdf: "application/pdf", png: "image/png", jpg: "image/jpeg", docx: DOCX_MIME }[ext as Ext],
+          "x-upsert": "false",
+        },
         body: file,
       });
       if (!put.ok) throw new Error(`Upload failed (${put.status}). Try again.`);
 
       setStage({ name: "working", message: "Claude is reading the invoice. This can take up to a minute for long PDFs…" });
-      const { draft } = await api<{ draft: ReviewDraft }>(`/api/uploads/${uploadId}/extract`, {
+      const { draft, previewText } = await api<{ draft: ReviewDraft; previewText: string | null }>(`/api/uploads/${uploadId}/extract`, {
         method: "POST",
         json: { ext, fileName: file.name },
       });
       const { url } = await api<{ url: string }>(`/api/uploads/${uploadId}/view?ext=${ext}`);
       setDocNumber(draft.documentInvoiceNumber);
-      setStage({ name: "review", uploadId, ext: ext as Ext, fileName: file.name, viewUrl: url, draft });
+      setStage({ name: "review", uploadId, ext: ext as Ext, fileName: file.name, viewUrl: url, draft, previewText });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setStage({ name: "pick" });
@@ -129,7 +139,18 @@ export default function UploadPage() {
         {draft.warnings.map((w, i) => <div key={i} className="alert warn">{w}</div>)}
         <div className="review">
           <div className="viewer">
-            {stage.ext === "pdf" ? <iframe src={stage.viewUrl} title="Original document" /> : <img src={stage.viewUrl} alt="Original document" />}
+            {stage.ext === "pdf" ? (
+              <iframe src={stage.viewUrl} title="Original document" />
+            ) : stage.ext === "docx" ? (
+              <div style={{ height: "100%", overflow: "auto", padding: 16 }}>
+                <p className="muted small" style={{ marginTop: 0 }}>
+                  Text of the Word file (what Claude read). <a href={stage.viewUrl}>Download the original .docx</a>
+                </p>
+                <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit", fontSize: 13, margin: 0 }}>{stage.previewText}</pre>
+              </div>
+            ) : (
+              <img src={stage.viewUrl} alt="Original document" />
+            )}
           </div>
           <div>
             <InvoiceForm
@@ -176,8 +197,8 @@ export default function UploadPage() {
           }}
         >
           <p style={{ fontSize: 17, fontWeight: 700, color: "var(--teal)" }}>Drop a PDF or photo here, or click to choose</p>
-          <p className="muted small">PDF, PNG, JPG or iPhone HEIC · up to 20 MB · multi-page PDFs are fine</p>
-          <input type="file" accept=".pdf,.png,.jpg,.jpeg,.heic,.heif,application/pdf,image/png,image/jpeg,image/heic,image/heif" style={{ display: "none" }} onChange={(e) => handleFile(e.target.files?.[0])} />
+          <p className="muted small">PDF, Word (.docx), PNG, JPG or iPhone HEIC · up to 20 MB · multi-page PDFs are fine</p>
+          <input type="file" accept=".pdf,.docx,.png,.jpg,.jpeg,.heic,.heif,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/png,image/jpeg,image/heic,image/heif" style={{ display: "none" }} onChange={(e) => handleFile(e.target.files?.[0])} />
         </label>
       )}
     </>
