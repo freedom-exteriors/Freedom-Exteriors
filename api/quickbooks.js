@@ -5,93 +5,16 @@
 //   GET  ?action=status   (admin)  -> { connected, company }
 //   POST ?action=invoice  (admin)  { jobId } -> { invoiceId, docNumber }
 //   POST ?action=disconnect (admin)
+// Called by the invoice tool (invoice-project) with the shared
+// x-invoice-tool-key header instead of a staff login; see _lib/invoiceTool.js:
+//   POST ?action=tool-job     { jobId }  -> the job's customer details
+//   POST ?action=tool-invoice { ...invoice } -> creates it in QuickBooks (once)
+//   POST ?action=tool-payment { docNumber, date, amountCents, note }
 import { requireStaff, supabaseAdmin } from "./_lib/supabase.js";
 import { APP_ORIGIN, getIntegration, setIntegration, clearIntegration, createOAuthState, consumeOAuthState } from "./_lib/integrations.js";
+import { toolKeyOk, jobForTool, validatePush, qbInvoiceBody, qbPaymentBody, qbInvoiceLink } from "./_lib/invoiceTool.js";
+import { PROVIDER, REDIRECT_URI, API_BASE, basicAuth, tokenRequest, toStored, connection, qb, q, findOrCreateCustomer, serviceItem } from "./_lib/quickbooks.js";
 
-const PROVIDER = "quickbooks";
-const REDIRECT_URI = `${APP_ORIGIN}/quickbooks/callback`;
-const TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer";
-// Intuit "Development" keys only work against the sandbox; set QB_ENVIRONMENT=sandbox to test with them.
-const API_BASE = process.env.QB_ENVIRONMENT === "sandbox"
-  ? "https://sandbox-quickbooks.api.intuit.com"
-  : "https://quickbooks.api.intuit.com";
-
-function basicAuth() {
-  return Buffer.from(`${process.env.QB_CLIENT_ID}:${process.env.QB_CLIENT_SECRET}`).toString("base64");
-}
-
-async function tokenRequest(params) {
-  const res = await fetch(TOKEN_URL, {
-    method: "POST",
-    headers: { Authorization: `Basic ${basicAuth()}`, "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
-    body: new URLSearchParams(params).toString(),
-  });
-  return res.json().catch(() => ({}));
-}
-
-function toStored(tokens, realmId) {
-  return {
-    realmId,
-    access_token: tokens.access_token,
-    refresh_token: tokens.refresh_token,
-    expires_at: Date.now() + (tokens.expires_in || 3600) * 1000,
-    refresh_expires_at: Date.now() + (tokens.x_refresh_token_expires_in || 100 * 86400) * 1000,
-  };
-}
-
-async function connection() {
-  const stored = await getIntegration(PROVIDER);
-  if (!stored?.refresh_token || !stored.realmId) return null;
-  if (Date.now() < stored.expires_at - 60000) return stored;
-  const fresh = await tokenRequest({ grant_type: "refresh_token", refresh_token: stored.refresh_token });
-  if (!fresh.access_token) return null; // refresh token expired or revoked: reconnect
-  const next = toStored({ ...fresh, refresh_token: fresh.refresh_token || stored.refresh_token }, stored.realmId);
-  await setIntegration(PROVIDER, { ...stored, ...next });
-  return { ...stored, ...next };
-}
-
-async function qb(conn, method, path, body) {
-  const res = await fetch(`${API_BASE}/v3/company/${conn.realmId}/${path}${path.includes("?") ? "&" : "?"}minorversion=73`, {
-    method,
-    headers: { Authorization: `Bearer ${conn.access_token}`, Accept: "application/json", ...(body ? { "Content-Type": "application/json" } : {}) },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const msg = data?.Fault?.Error?.[0]?.Detail || data?.Fault?.Error?.[0]?.Message || `QuickBooks error ${res.status}`;
-    const err = new Error(msg);
-    err.status = res.status;
-    throw err;
-  }
-  return data;
-}
-
-const q = (s) => String(s).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
-
-async function findOrCreateCustomer(conn, job) {
-  const name = String(job.name || "").trim().slice(0, 100);
-  if (!name) throw new Error("This job has no customer name");
-  const found = await qb(conn, "GET", `query?query=${encodeURIComponent(`select * from Customer where DisplayName = '${q(name)}'`)}`);
-  const existing = found?.QueryResponse?.Customer?.[0];
-  if (existing) return existing.Id;
-  const customer = {
-    DisplayName: name,
-    ...(job.email ? { PrimaryEmailAddr: { Address: job.email } } : {}),
-    ...(job.phone ? { PrimaryPhone: { FreeFormNumber: job.phone } } : {}),
-    ...(job.address ? { BillAddr: { Line1: job.address, City: job.city || undefined, CountrySubDivisionCode: job.state || undefined } } : {}),
-  };
-  const created = await qb(conn, "POST", "customer", customer);
-  return created.Customer.Id;
-}
-
-async function serviceItem(conn) {
-  if (process.env.QB_ITEM_ID) return process.env.QB_ITEM_ID;
-  const res = await qb(conn, "GET", `query?query=${encodeURIComponent("select * from Item where Type = 'Service' and Active = true maxresults 50")}`);
-  const items = res?.QueryResponse?.Item || [];
-  const pick = items.find(i => /roof|exterior|construction/i.test(i.Name)) || items.find(i => i.Name === "Services") || items[0];
-  if (!pick) throw new Error("QuickBooks has no service item to bill — add one (e.g. \"Roofing\") in QuickBooks, then try again");
-  return pick.Id;
-}
 
 export default async function handler(req, res) {
   const action = req.query.action;
@@ -106,6 +29,8 @@ export default async function handler(req, res) {
     await setIntegration(PROVIDER, toStored(tokens, realmId));
     return res.redirect(`${APP_ORIGIN}/?qb=connected`);
   }
+
+  if (typeof action === "string" && action.startsWith("tool-")) return invoiceToolAction(action, req, res);
 
   const staff = await requireStaff(req, res, { role: "admin" });
   if (!staff) return;
@@ -185,5 +110,86 @@ export default async function handler(req, res) {
     return res.status(502).json({ error: e.message || "QuickBooks request failed" });
   }
 
+  return res.status(400).json({ error: "Invalid action" });
+}
+
+async function findInvoiceByDocNumber(conn, docNumber) {
+  const found = await qb(conn, "GET", `query?query=${encodeURIComponent(`select * from Invoice where DocNumber = '${q(docNumber)}'`)}`);
+  return found?.QueryResponse?.Invoice?.[0] || null;
+}
+
+async function invoiceToolAction(action, req, res) {
+  if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
+  if (!toolKeyOk(req)) return res.status(401).json({ error: "Invoice tool key missing or wrong" });
+  const body = req.body || {};
+  try {
+    if (action === "tool-job") {
+      const jobId = Number(body.jobId);
+      if (!Number.isSafeInteger(jobId) || jobId <= 0) return res.status(400).json({ error: "Missing job" });
+      const { data: row } = await supabaseAdmin().from("jobs").select("data").eq("job_id", jobId).maybeSingle();
+      if (!row?.data) return res.status(404).json({ error: "CRM job not found" });
+      return res.status(200).json({ job: jobForTool(jobId, row.data) });
+    }
+
+    if (!process.env.QB_CLIENT_ID || !process.env.QB_CLIENT_SECRET) return res.status(500).json({ error: "QuickBooks keys aren't set up on the CRM server" });
+    const conn = await connection();
+    if (!conn) return res.status(409).json({ error: "QuickBooks isn't connected. In the CRM, click QB (top bar) and sign in to QuickBooks first." });
+
+    if (action === "tool-invoice") {
+      const v = validatePush(body);
+      if (!v.ok) return res.status(400).json({ error: v.errors.join(". ") });
+      const push = v.value;
+      // Never create the same invoice twice: an invoice with this number
+      // already in QuickBooks is reused (e.g. a retry after a timeout).
+      let invoice = await findInvoiceByDocNumber(conn, push.docNumber);
+      const created = !invoice;
+      if (!invoice) {
+        const customerId = await findOrCreateCustomer(conn, push.customer);
+        const itemId = await serviceItem(conn);
+        invoice = (await qb(conn, "POST", "invoice", qbInvoiceBody(push, customerId, itemId))).Invoice;
+      }
+      // Deposits become QuickBooks payments, recorded only while the invoice
+      // has none yet (Balance still equals the total), so a retry can't double them.
+      let paymentsRecorded = 0;
+      const untouched = Number(invoice.Balance) === Number(invoice.TotalAmt);
+      if (untouched) {
+        for (const p of push.payments) {
+          await qb(conn, "POST", "payment", qbPaymentBody(invoice, p));
+          paymentsRecorded++;
+        }
+      }
+      if (push.crmJobId) {
+        const { data: row } = await supabaseAdmin().from("jobs").select("data").eq("job_id", push.crmJobId).maybeSingle();
+        if (row?.data && !row.data.qbInvoiceId) {
+          await supabaseAdmin().from("jobs").update({
+            data: { ...row.data, qbInvoiceId: invoice.Id, qbInvoiceDocNumber: invoice.DocNumber || push.docNumber, qbInvoicedAt: new Date().toISOString() },
+          }).eq("job_id", push.crmJobId);
+        }
+      }
+      return res.status(200).json({
+        invoiceId: invoice.Id, docNumber: invoice.DocNumber, link: qbInvoiceLink(invoice.Id),
+        created, paymentsRecorded, paymentsSkipped: untouched ? 0 : push.payments.length,
+      });
+    }
+
+    if (action === "tool-payment") {
+      const docNumber = typeof body.docNumber === "string" ? body.docNumber.trim() : "";
+      const amountCents = body.amountCents;
+      if (!docNumber || !/^\d{4}-\d{2}-\d{2}$/.test(body.date || "") || !Number.isSafeInteger(amountCents) || amountCents <= 0) {
+        return res.status(400).json({ error: "Missing invoice number, date or amount" });
+      }
+      const invoice = await findInvoiceByDocNumber(conn, docNumber);
+      if (!invoice) return res.status(404).json({ error: `Invoice ${docNumber} isn't in QuickBooks` });
+      const balanceCents = Math.round(Number(invoice.Balance) * 100);
+      if (balanceCents <= 0) return res.status(200).json({ recorded: false, alreadyPaid: true });
+      const amount = Math.min(amountCents, balanceCents);
+      await qb(conn, "POST", "payment", qbPaymentBody(invoice, { date: body.date, amountCents: amount, note: typeof body.note === "string" ? body.note : "" }));
+      return res.status(200).json({ recorded: true, amountCents: amount });
+    }
+  } catch (e) {
+    console.error("QuickBooks (invoice tool):", e.message);
+    if (e.status === 401) return res.status(409).json({ error: "The QuickBooks connection expired. In the CRM, click QB and reconnect." });
+    return res.status(502).json({ error: e.message || "QuickBooks request failed" });
+  }
   return res.status(400).json({ error: "Invalid action" });
 }
