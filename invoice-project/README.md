@@ -98,4 +98,7 @@ npm run compare-reference     # builds test-output/pearson-invoice.docx (the ref
   (harmless; nothing in the catalog points to it).
 - Numbers printed on uploaded documents in our `FE-INV-YYYY-###` format move the counter past that
   number, so a later generated invoice never collides. That can leave a gap in the sequence, which is on purpose.
-- Extraction handles PDFs up to 100 pages and 20 MB.
+- Uploads accept PDF, Word (.docx), PNG, JPG and iPhone HEIC (converted to JPG in the browser), up to
+  20 MB. PDFs up to 100 pages. Word files are read as text (tables become `cell | cell` rows), so a
+  .docx that is only a scanned picture is rejected with a "save it as a PDF" message. Old `.doc`
+  files are rejected with "Save As .docx or PDF".
