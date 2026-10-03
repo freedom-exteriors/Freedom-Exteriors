@@ -1,0 +1,159 @@
+# Invoice Project (Freedom Exteriors LLC)
+
+An internal web tool to **generate** branded .docx invoices, **upload and catalog** old invoices
+(read by Claude, checked by a person before saving), **export** the catalog as a
+QuickBooks-style CSV, and **build estimates** by checking boxes from a price book.
+
+- Next.js (App Router, TypeScript), deployed on Vercel from the `invoice-project/` folder of this repo
+- Supabase project **invoice-project** (Postgres + one private storage bucket)
+- Anthropic API (`claude-sonnet-5-5`) for reading uploaded invoices
+- One shared password for the whole site
+
+It is separate from the CRM in the rest of this repo: its own Vercel project, its own
+Supabase project, and no shared code or data.
+
+## What's where
+
+| Area | Files |
+| --- | --- |
+| Company name, address, licenses, colors | `src/lib/company.ts` (the only place to change them) |
+| PDF version (for emailing) | `src/lib/pdf/buildPdf.ts`: the same layout, drawn with pdfkit from the same `LAYOUT` numbers |
+| Email PDF button and message wording | `src/components/EmailPdf.tsx`, `src/lib/emailText.ts` |
+| Letterhead layout (.docx) | `src/lib/docx/buildInvoiceDocx.ts`. `LAYOUT` holds every measurement, taken from `reference/Freedom_Exteriors_Estimate_Pearson.docx`; deviations are marked `DEVIATION` |
+| Logo | `src/lib/docx/logo.ts`, taken from the reference .docx by `npm run logo` |
+| License numbers (must print on every invoice) | `MN_LICENSE` / `WI_LICENSE` in `src/lib/company.ts`; `test/docx.test.ts` fails if either is missing |
+| Money math (integer cents) | `src/lib/money.ts` |
+| Server-side validation and totals | `src/lib/invoice.ts` |
+| Claude extraction | `src/lib/extract.ts`, `src/lib/review.ts` |
+| CSV export | `src/lib/csv.ts`, see `docs/field-mapping.md` |
+| Login and session cookie | `src/lib/session.ts`, `src/proxy.ts`, `src/app/api/login` |
+| Estimates (validation, math, estimate → invoice) | `src/lib/estimate.ts`, `src/lib/estimates.server.ts` |
+| Estimate builder screen (check boxes) | `src/components/EstimateBuilder.tsx` |
+| Database | `supabase/migrations/` |
+
+## How it's protected
+
+- **Password:** every page and API route is behind `src/proxy.ts` (Next.js 16's name for middleware).
+  Logging in sets an httpOnly, `SameSite=Strict`, signed cookie that lasts 14 days.
+- **Login rate limit:** 5 wrong passwords from one IP blocks that IP for 15 minutes (tracked in the
+  `login_attempts` table, so it works across Vercel's servers).
+- **Database:** Row Level Security is on for every table with **no** policies, so the public "anon"
+  key can read nothing. Only server code, using the service-role key, touches data. The service-role
+  key lives only in server environment variables, never in a `NEXT_PUBLIC_` variable, and
+  `src/lib/supabaseAdmin.ts` imports `server-only`, so the build fails if browser code tries to use it.
+- **Files:** the `invoice-files` bucket is private. Downloads use signed links that expire after
+  2 minutes. Uploads go straight from the browser to storage through a one-time signed upload link
+  (this avoids Vercel's 4.5 MB request limit).
+- **Money:** amounts are integer cents. The server recalculates every total; numbers the browser
+  calculates are display-only.
+- **Invoice numbers:** `next_invoice_number(year)` uses one atomic `INSERT … ON CONFLICT DO UPDATE …
+  RETURNING`, so simultaneous requests can't get the same number, repeat or skip. Tested with 200
+  parallel calls. `invoice_number` is also `UNIQUE`. Invoices can't be deleted (a trigger blocks it);
+  use **Void** instead, which keeps the number used.
+- **CSV:** cells starting with `= + - @` are prefixed with `'` so spreadsheets don't run them as formulas.
+
+## Estimates
+
+- **Price book** (`/price-book`): one row per check box, grouped by trade. Prices start blank except
+  where Nick's own documents gave one (the Pearson estimate and the CRM's $650/$750/$850 per square
+  tiers); blank means "type a price on each estimate". Items are retired, never deleted.
+- **New estimate** (`/estimates/new`): checking a box adds a line with the price-book price; qty and
+  price are editable per estimate. The server recomputes qty × price, overhead, profit and the total.
+  Numbers come from `next_estimate_number(year)` (FE-EST-YYYY-###, same atomic counter design).
+- **Word file**: the reference document's own layout ("ESTIMATE & SCOPE OF WORK", COST ESTIMATE,
+  TOTAL ESTIMATE, PAYMENT TERMS, ACCEPTANCE signature block), both license numbers in the header.
+- **Statuses**: Draft, Sent, Accepted, Declined, Void. Estimates can't be deleted.
+- **Make invoice**: opens `/invoices/new?fromEstimate=<id>` pre-filled. Nothing is saved and no
+  invoice number is used until Create invoice; then the estimate is marked Accepted and linked to
+  the invoice, and can no longer be edited.
+
+## CRM and QuickBooks
+
+The CRM (freedom-exteriors.vercel.app, repo root) owns the **one** QuickBooks connection. QuickBooks
+rotates its login tokens, so two apps with their own connections would log each other out. This
+app asks the CRM, server to server, to do QuickBooks work (`src/lib/crm.server.ts` →
+`api/quickbooks.js?action=tool-*` in the CRM).
+
+- **From the CRM:** a job's **New Estimate** / **New Invoice** buttons open this app with
+  `?crmJob=<id>`; the customer's name, phone, email and address are filled in from the job.
+- **Send to QuickBooks** (invoice page): creates the invoice in QuickBooks with the same FE-INV
+  number and lines (`src/lib/qbLines.ts`), records each deposit as a QuickBooks payment, and marks
+  the CRM job invoiced. Repeating it never duplicates anything (the CRM looks the number up first).
+  After that the invoice is locked here (edit and void happen in QuickBooks); **Mark paid** still
+  works and records the final payment in QuickBooks.
+- Lines are filed under the QuickBooks service item **Exterior Services**.
+- **Setup:** `INVOICE_TOOL_KEY` (a random 64-character secret) must be the same on this Vercel
+  project and the CRM's; `CRM_URL` is optional (defaults to https://freedom-exteriors.vercel.app).
+  QuickBooks itself is connected once, in the CRM: **QB** button in the top bar.
+
+## Emailing PDFs
+
+**Email PDF** on an invoice or estimate page builds a PDF (same letterhead as the .docx, built fresh
+from the saved data, never stored) and hands it to the phone's or computer's **share menu** with a
+ready-made message. Pick Mail or Gmail, add the customer's address and send: it goes from your own
+email account, sits in your Sent folder, and replies come to you. Nothing is sent by the app itself.
+
+- Browsers that can't share files (some desktop browsers) instead download the PDF and open a new
+  email with the subject and message filled in; drag the PDF from Downloads into it.
+- Emailing a **Draft** estimate marks it **Sent**.
+- Uploaded invoices get the same letterhead PDF, built from their reviewed details (lines with no
+  price print a blank amount). Download original still gives the file you uploaded.
+- PDFs use the built-in Times font, which covers normal English text and symbols like • — ½ é.
+  Emoji and unusual symbols are left out of the PDF (the .docx keeps them).
+
+## Environment variables
+
+Set these in **Vercel → invoice-project → Settings → Environment Variables** (Production), and in
+`invoice-project/.env.local` for local development. `.env.local` is git-ignored: never commit it.
+
+| Name | What it is, in plain English |
+| --- | --- |
+| `ANTHROPIC_API_KEY` | The key that lets this app use Claude to read uploaded invoices. Create it at console.anthropic.com → API Keys. Usage is billed to your Anthropic account. |
+| `SUPABASE_URL` | The web address of the invoice-project database, like `https://abcd1234.supabase.co`. Not secret. |
+| `SUPABASE_SERVICE_ROLE_KEY` | The master key to the invoice database. It bypasses all security rules, so it's server-only and must never be shared, pasted in chat, or put in a `NEXT_PUBLIC_` variable. Supabase → Project Settings → API Keys → `service_role` / secret key. |
+| `APP_PASSWORD` | The password you type to get into the site. At least 8 characters; use 4+ random words. |
+| `INVOICE_TOOL_KEY` | Shared secret this app uses to call the CRM (for QuickBooks and CRM jobs). Must equal the CRM project's `INVOICE_TOOL_KEY`. Nobody types it. |
+| `CRM_URL` | Optional. The CRM's web address; default `https://freedom-exteriors.vercel.app`. Not secret. |
+| `SESSION_SECRET` | A long random string the server uses to sign the login cookie so nobody can forge one. Nobody ever types it. At least 32 characters. Generate one with `openssl rand -hex 32`. |
+
+## Rotating (changing) the password
+
+1. Vercel → **invoice-project** → **Settings** → **Environment Variables**.
+2. Find `APP_PASSWORD` → **⋯** → **Edit** → type the new password → **Save**.
+3. **Deployments** → newest deployment → **⋯** → **Redeploy**. The new password takes effect when that finishes.
+
+Everyone who was logged in is logged out automatically, because the cookie signature includes the
+password. To force everyone out without changing the password, change `SESSION_SECRET` the same way.
+
+## Setting up from scratch
+
+1. Create a Supabase project, then run the files in `supabase/migrations/` in order (SQL editor, or
+   the Supabase MCP `apply_migration`).
+2. Create a Vercel project from this repo with **Root Directory** = `invoice-project`, and add the five
+   environment variables above.
+3. Deploy.
+
+## Local development
+
+```bash
+cd invoice-project
+npm install
+cp .env.example .env.local   # then fill in the values
+npm run dev                   # http://localhost:3000
+npm test                      # unit tests (money, CSV, session, validation)
+npm run typecheck
+npm run sample-docx           # writes test-output/sample-invoice.docx
+npm run logo                  # re-extracts the logo from ../reference/*.docx
+npm run compare-reference     # builds test-output/pearson-invoice.docx (the reference's content as an invoice)
+```
+
+## Known limits
+
+- An upload that's read by Claude but never saved leaves its file in storage under `originals/`
+  (harmless; nothing in the catalog points to it).
+- Numbers printed on uploaded documents in our `FE-INV-YYYY-###` format move the counter past that
+  number, so a later generated invoice never collides. That can leave a gap in the sequence, which is on purpose.
+- Uploads accept PDF, Word (.docx), PNG, JPG and iPhone HEIC (converted to JPG in the browser), up to
+  20 MB. PDFs up to 100 pages. Word files are read as text (tables become `cell | cell` rows), so a
+  .docx that is only a scanned picture is rejected with a "save it as a PDF" message. Old `.doc`
+  files are rejected with "Save As .docx or PDF".

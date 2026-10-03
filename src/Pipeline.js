@@ -19,6 +19,8 @@ import ScopeReview from "./ScopeReview";
 import { compressImage, uploadJobPhoto, usePhotoUrls, deleteJobPhotoFiles, movePhotosToStorage } from "./photos";
 /* eslint-disable react-hooks/exhaustive-deps */
 const TEAL = "#1a9e99"; const GOLD = "#e8a820"; const DARK = "#080d14";
+// The invoice tool (invoice-project): estimates, itemized invoices, PDFs, QuickBooks.
+const INVOICE_TOOL_URL = (process.env.REACT_APP_INVOICE_TOOL_URL || "https://invoice-project-two-orcin.vercel.app").replace(/\/$/, "");
 const PANEL = "#0f1923"; const PANEL2 = "#162030"; const BORDER = "#1e3048";
 const TEXT = "#e2eaf4"; const MUTED = "#6b8099"; const GREEN = "#10b981";
 
@@ -843,28 +845,12 @@ export default function Pipeline({ session }) {
     const out = await res.json().catch(() => ({}));
     if (out.url) window.location.href = out.url; else alert(out.error || "Couldn't start the QuickBooks connection.");
   };
-  const [qbInvoicing, setQbInvoicing] = useState(false);
-  const createQbInvoice = async (job) => {
-    if (!window.confirm(`Create a QuickBooks invoice for ${job.name} — $${Number(job.estimate?.total || 0).toLocaleString()}?`)) return;
-    setQbInvoicing(true);
-    try {
-      const res = await apiFetch("/api/quickbooks?action=invoice", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jobId: job.id }) });
-      const out = await res.json().catch(() => ({}));
-      if (res.ok && out.success) {
-        updateJob(job.id, { qbInvoiceId: out.invoiceId, qbInvoiceDocNumber: out.docNumber, qbInvoicedAt: new Date().toISOString() });
-        alert(`Invoice ${out.docNumber || out.invoiceId} created in QuickBooks.`);
-      } else if (res.status === 401) {
-        if (window.confirm(`${out.error || "QuickBooks isn't connected."} Connect now?`)) connectQuickBooks();
-      } else {
-        alert(out.error || "QuickBooks invoice failed.");
-      }
-    } catch (e) {
-      alert("Couldn't reach QuickBooks — check your connection.");
-    } finally {
-      setQbInvoicing(false);
-    }
+  // Estimates and itemized invoices are made in the invoice tool (its own
+  // app); it fills in this job's customer and sends invoices to QuickBooks
+  // through this CRM's QuickBooks connection.
+  const openInvoiceTool = (job, kind) => {
+    window.open(`${INVOICE_TOOL_URL}/${kind === "estimate" ? "estimates" : "invoices"}/new?crmJob=${encodeURIComponent(job.id)}`, "_blank", "noopener,noreferrer");
   };
-
 
   if (loading) return (
     <div style={{ minHeight:"100vh", background:DARK, display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:14, fontFamily:"'Barlow Condensed',sans-serif" }}>
@@ -918,7 +904,7 @@ export default function Pipeline({ session }) {
           {!isMobile && isAdmin && <button onClick={() => setPricingSettingsOpen(true)} style={{ background:"none", border:"1px solid #fbbf24", color:"#fbbf24", borderRadius:8, padding:"8px 14px", fontWeight:700, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>📐 Pricing</button>}
           {!isMobile && isAdmin && <button onClick={() => setMaterialsCatalogOpen(true)} style={{ background:"none", border:"1px solid #a78bfa", color:"#a78bfa", borderRadius:8, padding:"8px 14px", fontWeight:700, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>🧱 Materials</button>}
           {staffProfile && <button onClick={() => setQuickQuoteOpen(true)} title="Quick Quote" style={{ background:"none", border:"1px solid #38bdf8", color:"#38bdf8", borderRadius:8, padding:isMobile?"6px 10px":"8px 14px", fontWeight:700, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>🧮{!isMobile && " Quick Quote"}</button>}
-          {!isMobile && isAdmin && <button onClick={connectQuickBooks} title={qbStatus?.connected ? `QuickBooks connected${qbStatus.company ? ": " + qbStatus.company : ""}` : "Connect QuickBooks"} style={{ background:"none", border:"1px solid #2CA01C", color:"#2CA01C", borderRadius:8, padding:"8px 14px", fontWeight:700, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>{qbStatus?.connected ? "✓ QB" : "🔗 QB"}</button>}
+          {isAdmin && <button onClick={connectQuickBooks} title={qbStatus?.connected ? `QuickBooks connected${qbStatus.company ? ": " + qbStatus.company : ""}` : "Connect QuickBooks"} style={{ background:"none", border:"1px solid #2CA01C", color:"#2CA01C", borderRadius:8, padding:isMobile?"6px 10px":"8px 14px", fontWeight:700, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>{qbStatus?.connected ? "✓ QB" : "🔗 QB"}</button>}
           <button onClick={() => supabase.auth.signOut()} style={{ background:"none", border:`1px solid ${BORDER}`, color:MUTED, borderRadius:8, padding:isMobile?"6px 10px":"8px 14px", fontWeight:700, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>{isMobile?"↪":"Sign Out"}</button>
           <button onClick={openNew} style={{ background:GOLD, color:"#000", border:"none", borderRadius:8, padding:isMobile?"8px 14px":"8px 18px", fontWeight:800, fontSize:isMobile?12:13, cursor:"pointer", fontFamily:"inherit" }}>+ {isMobile?"New":"NEW JOB"}</button>
         </div>
@@ -1240,11 +1226,10 @@ export default function Pipeline({ session }) {
                     <button onClick={() => setGbbOpen(true)} style={{ background:"#fbbf2422", border:"1px solid #fbbf24", color:"#fbbf24", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>📐 Good/Better/Best{selected.gbb?.sqFt ? " ✓" : ""}</button>
                     {isAdmin && <button onClick={() => setScopeReviewOpen(true)} style={{ background:"#38bdf822", border:"1px solid #38bdf8", color:"#38bdf8", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>🔎 Scope Review{selected.scopeReviews?.length ? ` (${selected.scopeReviews.length})` : ""}</button>}
                     <button onClick={async () => { const token = selected.portal_token || newPortalToken(); if (!selected.portal_token) updateJob(selected.id, { portal_token: token }); const link = `${window.location.origin}/portal/${token}`; navigator.clipboard.writeText(link); alert("Portal link copied!"); }} style={{ background:GOLD+"22", border:`1px solid ${GOLD}`, color:GOLD, borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>🔗 Portal Link</button>
-                    {isAdmin && selected.stage === "collected" && (
-                      selected.qbInvoiceId
-                        ? <span style={{ background:"#2CA01C11", border:"1px solid #2CA01C66", color:"#2CA01C", borderRadius:7, padding:"10px 14px", fontSize:13, fontWeight:700 }}>📊 QB Invoice {selected.qbInvoiceDocNumber || selected.qbInvoiceId} ✓</span>
-                        : <button disabled={qbInvoicing} onClick={() => createQbInvoice(selected)} style={{ background:"#2CA01C22", border:"1px solid #2CA01C", color:"#2CA01C", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700, opacity:qbInvoicing?0.6:1 }}>{qbInvoicing ? "Creating invoice…" : "📊 QB Invoice"}</button>
-                    )}
+                    {isAdmin && <button onClick={() => openInvoiceTool(selected, "estimate")} style={{ background:"#0E8A9622", border:"1px solid #0E8A96", color:"#2bb7c4", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>🧾 New Estimate ↗</button>}
+                    {isAdmin && (selected.qbInvoiceId
+                      ? <span style={{ background:"#2CA01C11", border:"1px solid #2CA01C66", color:"#2CA01C", borderRadius:7, padding:"10px 14px", fontSize:13, fontWeight:700 }}>📊 QB Invoice {selected.qbInvoiceDocNumber || selected.qbInvoiceId} ✓</span>
+                      : <button onClick={() => openInvoiceTool(selected, "invoice")} style={{ background:"#2CA01C22", border:"1px solid #2CA01C", color:"#2CA01C", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>🧾 New Invoice ↗</button>)}
                     {selected.installDate && <button onClick={() => openGoogleCalendar(selected)} style={{ background:"#1a73e822", border:"1px solid #1a73e8", color:"#1a73e8", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>📅 Add to Calendar</button>}
                     {selected.hoverId && <button onClick={() => fetchHoverMeasurements(selected)} style={{ background:"#ff6b2222", border:"1px solid #ff6b22", color:"#ff6b22", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>📐 Fetch Measurements</button>}
                     {isAdmin && <button onClick={() => removeJob(selected.id)} style={{ background:"#7c2d1222", border:"1px solid #7c2d12", color:"#f87171", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13 }}>🗑️ Delete</button>}

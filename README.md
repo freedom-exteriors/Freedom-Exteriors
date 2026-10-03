@@ -18,6 +18,12 @@ https://freedom-exteriors.vercel.app.
 | Scope review (Claude) | `api/scope-review.js`, `src/ScopeReview.js` |
 | Database changes | `supabase/migrations/` |
 
+## Invoice Project (separate app)
+
+`invoice-project/` is a separate Next.js app (own Vercel project and own Supabase
+project) for generating, cataloging and exporting invoices. See
+`invoice-project/README.md`. It shares no code or data with the CRM.
+
 ## How data is protected
 
 - **Staff** sign in with Supabase Auth and must be on the `staff` table.

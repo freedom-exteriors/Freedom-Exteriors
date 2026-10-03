@@ -1,0 +1,45 @@
+// Company facts used on every invoice. Change them here and nowhere else.
+// Both license numbers MUST print on every generated invoice; a test
+// (test/docx.test.ts) fails if either is missing from the .docx.
+
+export const MN_LICENSE = "BC-810020";
+export const WI_LICENSE = "4811-DCFR";
+
+export const COMPANY = {
+  legalName: "Freedom Exteriors LLC",
+  shortName: "Freedom Exteriors",
+  addressLine: "1145 Summit Ave., Mahtomedi, MN 55115",
+  website: "www.freedom-exteriors.com",
+  phone: "(651) 283-1689",
+  mnLicense: MN_LICENSE,
+  wiLicense: WI_LICENSE,
+  /** Second header line, exactly as on the reference estimate. */
+  get licenseLine() {
+    return `${this.website}  •  MN License # ${MN_LICENSE}  •  WI Dwelling Contractor License # ${WI_LICENSE}`;
+  },
+  colors: {
+    teal: "0E8A96",
+    gold: "F5B301",
+    text: "222222",
+    gray: "666666",
+    lightFill: "F2F2F2",
+  },
+  invoicePrefix: "FE-INV",
+  defaultTermsDays: 30,
+  // Default PAYMENT TERMS (editable per invoice). Same shape as the
+  // reference estimate's section: typed "• " lines, then a closing paragraph.
+  // The wording is ours: the reference's terms are for an estimate
+  // (deposit at signing, valid 30 days) and don't fit an invoice.
+  defaultPaymentTerms: [
+    "• Balance due by the due date shown above",
+    "• Checks payable to Freedom Exteriors LLC; please include the invoice number",
+    "Questions about this invoice? Call (651) 283-1689. Thank you for choosing Freedom Exteriors.",
+  ].join("\n"),
+  // Default PAYMENT TERMS for estimates: the reference estimate's wording,
+  // with {days} replaced by the estimate's "valid for" days.
+  defaultEstimatePaymentTerms: [
+    "• 50% deposit due upon signed acceptance to schedule materials and crew",
+    "• 50% due upon completion",
+    "This estimate is valid for {days} days from the date above. Pricing is based on visible conditions at time of estimate; unforeseen structural, rot, mold, or code-required work discovered once areas are opened will be billed per the T&M allowance above and requires client sign-off before work proceeds. Permit fees, if required, are not included unless noted.",
+  ].join("\n"),
+} as const;
