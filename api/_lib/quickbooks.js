@@ -52,10 +52,16 @@ export async function qb(conn, method, path, body) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const msg = data?.Fault?.Error?.[0]?.Detail || data?.Fault?.Error?.[0]?.Message || `QuickBooks error ${res.status}`;
-    const err = new Error(msg);
-    err.status = res.status;
+  // Intuit's reference for this request; their support asks for it.
+  const intuitTid = res.headers?.get?.("intuit_tid") || null;
+  // QuickBooks can report a Fault with HTTP 200, so check both.
+  if (!res.ok || data?.Fault) {
+    const e0 = data?.Fault?.Error?.[0];
+    const msg = e0?.Detail || e0?.Message || `QuickBooks error ${res.status}`;
+    const err = new Error(intuitTid ? `${msg} (QuickBooks ref ${intuitTid})` : msg);
+    err.status = res.ok ? 400 : res.status;
+    err.intuitTid = intuitTid;
+    err.qbCode = e0?.code || null;
     throw err;
   }
   return data;
