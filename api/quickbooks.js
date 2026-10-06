@@ -106,7 +106,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true, invoiceId: inv.Id, docNumber: inv.DocNumber || null });
     }
   } catch (e) {
-    console.error("QuickBooks:", e.message);
+    console.error("QuickBooks:", e.message, { status: e.status, code: e.qbCode, intuit_tid: e.intuitTid });
     if (e.status === 401) return res.status(401).json({ error: "QuickBooks connection expired — reconnect it" });
     return res.status(502).json({ error: e.message || "QuickBooks request failed" });
   }
@@ -201,7 +201,7 @@ async function invoiceToolAction(action, req, res) {
       return res.status(200).json({ recorded: true, amountCents: amount });
     }
   } catch (e) {
-    console.error("QuickBooks (invoice tool):", e.message);
+    console.error("QuickBooks (invoice tool):", e.message, { status: e.status, code: e.qbCode, intuit_tid: e.intuitTid });
     if (e.status === 401) return res.status(409).json({ error: "The QuickBooks connection expired. In the CRM, click QB and reconnect." });
     return res.status(502).json({ error: e.message || "QuickBooks request failed" });
   }
