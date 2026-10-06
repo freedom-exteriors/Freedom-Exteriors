@@ -7,6 +7,7 @@ const PANEL = "#0f1923"; const PANEL2 = "#162030"; const BORDER = "#1e3048";
 const TEXT = "#e2eaf4"; const MUTED = "#6b8099"; const GREEN = "#10b981";
 
 const OP_ALLOC_PCT = 0.15;
+export const PAID_LEAD_COLOR = "#a78bfa";
 
 const TIERS = [
   { value: 30, label: "30%", desc: "Paid Lead / Entry Rep" },
@@ -36,8 +37,23 @@ const COST_LINES = [
   { key: "other",          label: "S. Other" },
 ];
 
+// A lead bought from someone else costs 35% of the 30%-tier commission,
+// i.e. 10.5% of the commissionable net, whatever tier the rep is on.
+export const LEAD_FEE_RATE = 0.105;
+
+// Who is owed a lead fee on this job: ProAct Resources (PAR), another
+// company that sold us the lead (Paid Lead), or nobody.
+export function leadSource(job) {
+  if (job?.parLead) return { kind: "par", short: "PAR", title: "PAR Lead — ProAct Resources", payee: "ProAct Resources" };
+  if (job?.paidLead) {
+    const company = String(job.paidLeadSource || "").trim();
+    return { kind: "paid", short: "Paid Lead", title: company ? `Paid Lead — ${company}` : "Paid Lead", payee: company || "the lead company" };
+  }
+  return null;
+}
+
 // Shared with the job board's commission overview so both always agree.
-export function calcCommission(c, isParLead) {
+export function calcCommission(c, hasLeadFee) {
   const gross = parseFloat(c?.grossRevenue) || 0;
   const opAlloc = gross * OP_ALLOC_PCT;
   const netRev = gross - opAlloc;
@@ -48,9 +64,9 @@ export function calcCommission(c, isParLead) {
   const commNet = netRev - costs;
   const tier = parseFloat(c?.tier) || 30;
   const commission = commNet * (tier / 100);
-  const parFee = isParLead ? commNet * 0.105 : 0;
-  const repNet = commission - parFee;
-  return { gross, opAlloc, netRev, costs, commNet, tier, commission, parFee, repNet, isParLead };
+  const leadFee = hasLeadFee ? commNet * LEAD_FEE_RATE : 0;
+  const repNet = commission - leadFee;
+  return { gross, opAlloc, netRev, costs, commNet, tier, commission, leadFee, repNet, hasLeadFee: !!hasLeadFee };
 }
 
 function fmt(n) {
@@ -82,6 +98,34 @@ function CostInput({ label, value, onChange }) {
         />
       </div>
     </div>
+  );
+}
+
+function LeadToggle({ active, color, icon, title, desc, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        width: "100%", marginTop: 10, padding: "12px 14px", borderRadius: 8,
+        fontFamily: "inherit", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between",
+        background: active ? `${color}22` : PANEL2,
+        border: `1.5px solid ${active ? color : BORDER}`,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span style={{ fontSize: 18 }}>{icon}</span>
+        <div style={{ textAlign: "left" }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: active ? color : MUTED }}>{title}</div>
+          <div style={{ fontSize: 10, color: MUTED, marginTop: 1 }}>{desc}</div>
+        </div>
+      </div>
+      <div style={{
+        width: 42, height: 24, borderRadius: 12, padding: "2px", display: "flex", alignItems: "center",
+        background: active ? color : BORDER, justifyContent: active ? "flex-end" : "flex-start", transition: "all 0.2s"
+      }}>
+        <div style={{ width: 20, height: 20, borderRadius: 10, background: "#fff" }} />
+      </div>
+    </button>
   );
 }
 
@@ -118,7 +162,11 @@ export default function CommissionWorkbook({ job, isAdmin, onSave, onClose }) {
   const c = job.commission || {};
   const [local, setLocal] = useState({ ...c, tier: c.tier || 30 });
   const [savedFlash, setSavedFlash] = useState(false);
-  const [parActive, setParActive] = useState(!!job.parLead);
+  const [leadKind, setLeadKind] = useState(job.parLead ? "par" : job.paidLead ? "paid" : null);
+  const [paidLeadSource, setPaidLeadSource] = useState(job.paidLeadSource || "");
+  const leadFlags = { parLead: leadKind === "par", paidLead: leadKind === "paid", paidLeadSource };
+  const lead = leadSource(leadFlags);
+  const toggleLead = (kind) => setLeadKind(k => (k === kind ? null : kind));
   const [repSplitActive, setRepSplitActive] = useState(!!c.repSplitActive);
   const [repSplits, setRepSplits] = useState(c.repSplits && c.repSplits.length ? c.repSplits : [{ id: Date.now(), name: "", pct: "" }]);
 
@@ -129,13 +177,13 @@ export default function CommissionWorkbook({ job, isAdmin, onSave, onClose }) {
   const updateRepRow = (id, key, val) => setRepSplits(rows => rows.map(r => r.id === id ? { ...r, [key]: val } : r));
 
   const save = () => {
-    onSave({ commission: { ...local, repSplitActive, repSplits } });
+    onSave({ commission: { ...local, repSplitActive, repSplits }, ...leadFlags });
     setSavedFlash(true);
     setTimeout(() => setSavedFlash(false), 1800);
   };
 
-  const r = calcCommission(local, parActive);
-  const finalCommission = r.isParLead ? r.repNet : r.commission;
+  const r = calcCommission(local, !!lead);
+  const finalCommission = r.hasLeadFee ? r.repNet : r.commission;
   const repSplitPctTotal = repSplits.reduce((sum, row) => sum + (parseFloat(row.pct) || 0), 0);
 
   return (
@@ -150,7 +198,7 @@ export default function CommissionWorkbook({ job, isAdmin, onSave, onClose }) {
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
           {savedFlash && <span style={{ color: TEAL, fontSize: 12, fontWeight: 700 }}>✓ Saved</span>}
-          <button onClick={() => exportCommissionWorkbook({ ...local, repSplitActive, repSplits }, job, parActive)} style={{ background:"#fff2", border:"1px solid #fff4", color:TEXT, borderRadius:7, padding:"9px 14px", fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>📥 PDF</button>
+          <button onClick={() => exportCommissionWorkbook({ ...local, repSplitActive, repSplits }, job, lead)} style={{ background:"#fff2", border:"1px solid #fff4", color:TEXT, borderRadius:7, padding:"9px 14px", fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>📥 PDF</button>
           <button onClick={save} style={{ background: `${TEAL}22`, border: `1px solid ${TEAL}`, color: TEAL, borderRadius: 7, padding: "9px 16px", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>💾 Save</button>
           <button onClick={onClose} style={{ background: "none", border: `1px solid ${BORDER}`, color: MUTED, borderRadius: 7, padding: "9px 14px", fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>✕ Close</button>
         </div>
@@ -222,30 +270,22 @@ export default function CommissionWorkbook({ job, isAdmin, onSave, onClose }) {
               })}
             </div>
 
-            {/* PAR toggle button */}
-            <button
-              onClick={() => setParActive(p => !p)}
-              style={{
-                width: "100%", marginTop: 10, padding: "12px 14px", borderRadius: 8,
-                fontFamily: "inherit", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between",
-                background: parActive ? "#22d3ee22" : PANEL2,
-                border: `1.5px solid ${parActive ? "#22d3ee" : BORDER}`,
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <span style={{ fontSize: 18 }}>📞</span>
-                <div style={{ textAlign: "left" }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: parActive ? "#22d3ee" : MUTED }}>PAR Lead — ProAct Resources</div>
-                  <div style={{ fontSize: 10, color: MUTED, marginTop: 1 }}>Deducts 10.5% of commissionable net (35% of 30%)</div>
-                </div>
-              </div>
-              <div style={{
-                width: 42, height: 24, borderRadius: 12, padding: "2px", display: "flex", alignItems: "center",
-                background: parActive ? "#22d3ee" : BORDER, justifyContent: parActive ? "flex-end" : "flex-start", transition: "all 0.2s"
-              }}>
-                <div style={{ width: 20, height: 20, borderRadius: 10, background: "#fff" }} />
-              </div>
-            </button>
+            {/* Lead fee toggles — PAR or another company's paid lead, never both */}
+            <LeadToggle
+              active={leadKind === "par"} color="#22d3ee" icon="📞" onClick={() => toggleLead("par")}
+              title="PAR Lead — ProAct Resources" desc="Deducts 10.5% of commissionable net (35% of 30%)"
+            />
+            <LeadToggle
+              active={leadKind === "paid"} color={PAID_LEAD_COLOR} icon="💵" onClick={() => toggleLead("paid")}
+              title="Paid Lead — another company" desc="Deducts 10.5% of commissionable net (35% of 30%)"
+            />
+            {leadKind === "paid" && (
+              <input
+                type="text" value={paidLeadSource} onChange={e => setPaidLeadSource(e.target.value)}
+                placeholder="Company that sold the lead"
+                style={{ width: "100%", marginTop: 8, background: PANEL2, border: `1px solid ${PAID_LEAD_COLOR}`, borderRadius: 7, color: TEXT, padding: "10px", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box" }}
+              />
+            )}
           </div>
 
           {/* Final commission */}
@@ -253,20 +293,27 @@ export default function CommissionWorkbook({ job, isAdmin, onSave, onClose }) {
             <div style={{ fontSize: 11, fontWeight: 700, color: MUTED, textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>W. Rep Gross Commission (U × V)</div>
             <div style={{ fontSize: 36, fontWeight: 800, color: r.commission >= 0 ? GOLD : "#f87171", fontFamily: "monospace" }}>{fmt(r.commission)}</div>
             <div style={{ fontSize: 12, color: MUTED, marginTop: 4 }}>{r.tier}% of {fmt(r.commNet)} commissionable net</div>
-            {r.isParLead && (
+            {lead && (
               <div style={{ marginTop: 14, borderTop: `1px solid ${GOLD}44`, paddingTop: 14 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                  <span style={{ fontSize: 12, color: "#f87171" }}>− PAR Fee (10.5% of net — 35% of 30%)</span>
-                  <span style={{ fontSize: 13, fontFamily: "monospace", color: "#f87171", fontWeight: 700 }}>− {fmt(r.parFee)}</span>
+                  <span style={{ fontSize: 12, color: "#f87171" }}>− {lead.short} Fee (10.5% of net — 35% of 30%)</span>
+                  <span style={{ fontSize: 13, fontFamily: "monospace", color: "#f87171", fontWeight: 700 }}>− {fmt(r.leadFee)}</span>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: `${TEAL}11`, border: `1px solid ${TEAL}44`, borderRadius: 7, padding: "10px 14px", marginBottom: 10 }}>
                   <span style={{ fontSize: 13, fontWeight: 700, color: TEAL }}>Rep Net Commission</span>
                   <span style={{ fontSize: 20, fontFamily: "monospace", color: TEAL, fontWeight: 800 }}>{fmt(r.repNet)}</span>
                 </div>
-                <div style={{ background: "#22d3ee11", border: "1px solid #22d3ee44", borderRadius: 7, padding: "10px 14px", textAlign: "left" }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: "#22d3ee", textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>⚠️ PAR Fee Due to ProAct Resources</div>
-                  <div style={{ fontSize: 11, color: MUTED, lineHeight: 1.6 }}>Per the ProAct Resources agreement (signed 09/01/2026), <strong style={{ color: TEXT }}>{fmt(r.parFee)}</strong> is owed to PAR within <strong style={{ color: TEXT }}>15 days of deposit</strong> or receipt of payment.</div>
-                </div>
+                {lead.kind === "par" ? (
+                  <div style={{ background: "#22d3ee11", border: "1px solid #22d3ee44", borderRadius: 7, padding: "10px 14px", textAlign: "left" }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: "#22d3ee", textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>⚠️ PAR Fee Due to ProAct Resources</div>
+                    <div style={{ fontSize: 11, color: MUTED, lineHeight: 1.6 }}>Per the ProAct Resources agreement (signed 09/01/2026), <strong style={{ color: TEXT }}>{fmt(r.leadFee)}</strong> is owed to PAR within <strong style={{ color: TEXT }}>15 days of deposit</strong> or receipt of payment.</div>
+                  </div>
+                ) : (
+                  <div style={{ background: `${PAID_LEAD_COLOR}11`, border: `1px solid ${PAID_LEAD_COLOR}44`, borderRadius: 7, padding: "10px 14px", textAlign: "left" }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: PAID_LEAD_COLOR, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>⚠️ Lead Fee Due to {lead.payee}</div>
+                    <div style={{ fontSize: 11, color: MUTED, lineHeight: 1.6 }}><strong style={{ color: TEXT }}>{fmt(r.leadFee)}</strong> is owed to {lead.payee} for this lead, per your agreement with them.</div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -280,8 +327,8 @@ export default function CommissionWorkbook({ job, isAdmin, onSave, onClose }) {
             <div>− Total Costs: <span style={{ color: "#f87171", fontFamily: "monospace" }}>{fmt(r.costs)}</span></div>
             <div>= Commissionable Net: <span style={{ color: GREEN, fontFamily: "monospace" }}>{fmt(r.commNet)}</span></div>
             <div>× Commission Tier ({r.tier}%): <span style={{ color: GOLD, fontFamily: "monospace", fontWeight: 700 }}>{fmt(r.commission)}</span></div>
-            {r.isParLead && <>
-              <div>− PAR Fee (10.5% of net): <span style={{ color: "#f87171", fontFamily: "monospace" }}>− {fmt(r.parFee)}</span></div>
+            {lead && <>
+              <div>− {lead.short} Fee (10.5% of net): <span style={{ color: "#f87171", fontFamily: "monospace" }}>− {fmt(r.leadFee)}</span></div>
               <div style={{ borderTop: `1px solid ${BORDER}`, marginTop: 4, paddingTop: 4 }}>= Rep Net: <span style={{ color: TEAL, fontFamily: "monospace", fontWeight: 700 }}>{fmt(r.repNet)}</span></div>
             </>}
             {repSplitActive && repSplits.some(row => row.name || row.pct) && (
@@ -312,7 +359,7 @@ export default function CommissionWorkbook({ job, isAdmin, onSave, onClose }) {
           {repSplitActive && (
             <>
               <div style={{ fontSize: 11, color: MUTED, marginBottom: 12 }}>
-                Splits <strong style={{ color: TEXT }}>{fmt(finalCommission)}</strong> — the {r.isParLead ? "Rep Net Commission (after PAR fee)" : "Gross Commission"} — between whoever agreed to split this deal.
+                Splits <strong style={{ color: TEXT }}>{fmt(finalCommission)}</strong> — the {lead ? `Rep Net Commission (after ${lead.short} fee)` : "Gross Commission"} — between whoever agreed to split this deal.
               </div>
 
               {repSplits.map((row, i) => {

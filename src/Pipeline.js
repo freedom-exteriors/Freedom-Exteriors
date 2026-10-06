@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { supabase } from "./supabase";
 import { apiFetch } from "./apiFetch";
 import ContractFill from "./ContractFill";
-import CommissionWorkbook, { calcCommission } from "./CommissionWorkbook";
+import CommissionWorkbook, { calcCommission, leadSource, PAID_LEAD_COLOR } from "./CommissionWorkbook";
 import ContractorAgreement from "./ContractorAgreement";
 import RetailContract from "./RetailContract";
 import PurchaseAgreement from "./PurchaseAgreement";
@@ -497,7 +497,7 @@ function PortalActivity({ job }) {
 const blank = () => ({
   id: Date.now(), name:"", address:"", city:"", state:"MN", phone:"", email:"",
   type:"Roof", stage:"lead", claimNum:"", insurer:"State Farm", adjuster:"", adjPhone:"",
-  hoverId:"", notes:"", homeownerNote:"", followUp:false, assigned:"", parLead:false,
+  hoverId:"", notes:"", homeownerNote:"", followUp:false, assigned:"", parLead:false, paidLead:false, paidLeadSource:"",
   added: new Date().toISOString().slice(0,10),
   photos:[], checklist:{}, materials:[], estimate:{total:0,downPayment:0,scope:"",deductible:0},
   contract:null, commission:{grossRevenue:0},
@@ -973,6 +973,7 @@ export default function Pipeline({ session }) {
                         <div style={{ color:MUTED, fontSize:11, marginBottom:3 }}>{job.city}, <span style={{ color:stateColor(job.state), fontWeight:700 }}>{job.state}</span></div>
                         <span style={{ background:TEAL+"22", color:TEAL, borderRadius:3, padding:"1px 6px", fontSize:10, fontWeight:600 }}>{job.type}</span>
                         {job.parLead && <span style={{ background:"#22d3ee22", color:"#22d3ee", borderRadius:3, padding:"1px 6px", fontSize:10, fontWeight:700, marginLeft:4 }}>📞 PAR</span>}
+                        {job.paidLead && !job.parLead && <span style={{ background:PAID_LEAD_COLOR+"22", color:PAID_LEAD_COLOR, borderRadius:3, padding:"1px 6px", fontSize:10, fontWeight:700, marginLeft:4 }}>💵 PAID LEAD</span>}
                         {job.estimate?.total > 0 && <div style={{ fontSize:10, color:"#10b981", marginTop:3, fontWeight:700 }}>${job.estimate.total.toLocaleString()}</div>}
                         {job.claimNum && <div style={{ fontSize:10, color:GOLD, marginTop:2, fontFamily:"monospace" }}>{job.claimNum}</div>}
                         <div style={{ marginTop:6 }}>
@@ -1115,8 +1116,9 @@ export default function Pipeline({ session }) {
           <div style={{ display:"grid", gridTemplateColumns:isMobile?"1fr":"1fr 1fr", gap:16 }}>
             {jobs.filter(j => j.estimate?.total > 0 || j.commission?.grossRevenue > 0).map(job => {
               const c = job.commission || {};
-              const r = calcCommission({ ...c, grossRevenue: c.grossRevenue || job.estimate?.total || 0 }, !!job.parLead);
-              const final = r.isParLead ? r.repNet : r.commission;
+              const lead = leadSource(job);
+              const r = calcCommission({ ...c, grossRevenue: c.grossRevenue || job.estimate?.total || 0 }, !!lead);
+              const final = lead ? r.repNet : r.commission;
               const money = v => `$${(Number(v) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
               return (
                 <div key={job.id} style={{ background:PANEL, border:`1px solid ${BORDER}`, borderRadius:10, padding:16 }}>
@@ -1124,12 +1126,12 @@ export default function Pipeline({ session }) {
                   <div style={{ color:MUTED, fontSize:12, marginBottom:12 }}>{job.city}, {job.state} · {job.type}{c.grossRevenue ? "" : " · using estimate total"}</div>
                   <div style={{ background:PANEL2, borderRadius:8, padding:12 }}>
                     <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
-                      {[["Gross Revenue", r.gross],["Op. Alloc (15%)", r.opAlloc],["Total Costs", r.costs],["Comm. Net", r.commNet], ...(r.isParLead ? [["PAR Fee (10.5%)", r.parFee]] : [])].map(([label, val]) => (
+                      {[["Gross Revenue", r.gross],["Op. Alloc (15%)", r.opAlloc],["Total Costs", r.costs],["Comm. Net", r.commNet], ...(lead ? [[`${lead.short} Fee (10.5%)`, r.leadFee]] : [])].map(([label, val]) => (
                         <div key={label}><div style={{ fontSize:9, color:MUTED, textTransform:"uppercase" }}>{label}</div><div style={{ fontSize:13, fontWeight:600, color: val < 0 ? "#f87171" : TEXT }}>{money(val)}</div></div>
                       ))}
                     </div>
                     <div style={{ marginTop:10, borderTop:`1px solid ${BORDER}`, paddingTop:10, textAlign:"center" }}>
-                      <div style={{ fontSize:10, color:MUTED, textTransform:"uppercase" }}>{r.isParLead ? "Rep Commission after PAR" : "Commission"} ({r.tier}% tier)</div>
+                      <div style={{ fontSize:10, color:MUTED, textTransform:"uppercase" }}>{lead ? `Rep Commission after ${lead.short}` : "Commission"} ({r.tier}% tier)</div>
                       <div style={{ fontSize:26, fontWeight:800, color: final < 0 ? "#f87171" : GOLD }}>{money(final)}</div>
                     </div>
                   </div>
@@ -1195,6 +1197,15 @@ export default function Pipeline({ session }) {
                       <div>
                         <div style={{ fontWeight:700, fontSize:12, color:"#22d3ee" }}>ProAct Resources (PAR) Lead</div>
                         <div style={{ fontSize:11, color:MUTED, marginTop:2 }}>35% of gross commission owed to PAR within 15 days of deposit. Commission Workbook will auto-set to PAR tier.</div>
+                      </div>
+                    </div>
+                  )}
+                  {selected.paidLead && !selected.parLead && (
+                    <div style={{ background:PAID_LEAD_COLOR+"11", border:`1px solid ${PAID_LEAD_COLOR}44`, borderRadius:8, padding:"10px 14px", marginBottom:12, display:"flex", alignItems:"center", gap:10 }}>
+                      <span style={{ fontSize:18 }}>💵</span>
+                      <div>
+                        <div style={{ fontWeight:700, fontSize:12, color:PAID_LEAD_COLOR }}>{leadSource(selected).title}</div>
+                        <div style={{ fontSize:11, color:MUTED, marginTop:2 }}>35% of gross commission (10.5% of commissionable net) owed to {leadSource(selected).payee}. Commission Workbook deducts it automatically.</div>
                       </div>
                     </div>
                   )}
@@ -1495,10 +1506,20 @@ export default function Pipeline({ session }) {
               <input type="checkbox" checked={form.followUp} onChange={e => setForm(p=>({...p,followUp:e.target.checked}))} style={{ width:18, height:18, accentColor:GOLD }}/>
               <span>🔔 Flag for follow-up</span>
             </label>
-            <label style={{ display:"flex", alignItems:"center", gap:8, cursor:"pointer", marginBottom:20, fontSize:13, background:form.parLead?"#22d3ee11":"transparent", border:`1px solid ${form.parLead?"#22d3ee":"transparent"}`, borderRadius:7, padding: form.parLead?"8px 12px":"0" }}>
-              <input type="checkbox" checked={!!form.parLead} onChange={e => setForm(p=>({...p,parLead:e.target.checked}))} style={{ width:18, height:18, accentColor:"#22d3ee" }}/>
+            <label style={{ display:"flex", alignItems:"center", gap:8, cursor:"pointer", marginBottom:10, fontSize:13, background:form.parLead?"#22d3ee11":"transparent", border:`1px solid ${form.parLead?"#22d3ee":"transparent"}`, borderRadius:7, padding: form.parLead?"8px 12px":"0" }}>
+              <input type="checkbox" checked={!!form.parLead} onChange={e => setForm(p=>({...p,parLead:e.target.checked,...(e.target.checked?{paidLead:false}:{})}))} style={{ width:18, height:18, accentColor:"#22d3ee" }}/>
               <span style={{ color: form.parLead ? "#22d3ee" : TEXT }}>📞 PAR Lead — ProAct Resources {form.parLead && <span style={{ fontSize:11, color:"#22d3ee", marginLeft:4 }}>(35% commission fee owed to PAR on close)</span>}</span>
             </label>
+            <div style={{ marginBottom:20, background:form.paidLead?PAID_LEAD_COLOR+"11":"transparent", border:`1px solid ${form.paidLead?PAID_LEAD_COLOR:"transparent"}`, borderRadius:7, padding: form.paidLead?"8px 12px":"0" }}>
+              <label style={{ display:"flex", alignItems:"center", gap:8, cursor:"pointer", fontSize:13 }}>
+                <input type="checkbox" checked={!!form.paidLead} onChange={e => setForm(p=>({...p,paidLead:e.target.checked,...(e.target.checked?{parLead:false}:{})}))} style={{ width:18, height:18, accentColor:PAID_LEAD_COLOR }}/>
+                <span style={{ color: form.paidLead ? PAID_LEAD_COLOR : TEXT }}>💵 Paid Lead — bought from another company {form.paidLead && <span style={{ fontSize:11, color:PAID_LEAD_COLOR, marginLeft:4 }}>(35% commission fee owed on close)</span>}</span>
+              </label>
+              {form.paidLead && (
+                <input value={form.paidLeadSource || ""} onChange={e => setForm(p=>({...p,paidLeadSource:e.target.value}))} placeholder="Company that sold the lead"
+                  style={{ width:"100%", marginTop:8, background:PANEL2, border:`1px solid ${BORDER}`, borderRadius:7, color:TEXT, padding:"10px", fontSize:13, fontFamily:"inherit", boxSizing:"border-box" }}/>
+              )}
+            </div>
             <div style={{ display:"flex", gap:8, justifyContent:"flex-end" }}>
               <button onClick={() => setShowForm(false)} style={{ background:"none", border:`1px solid ${BORDER}`, color:MUTED, borderRadius:7, padding:"11px 18px", cursor:"pointer", fontFamily:"inherit", fontSize:13 }}>Cancel</button>
               <button onClick={saveJob} style={{ background:GOLD, color:"#000", border:"none", borderRadius:7, padding:"11px 22px", fontWeight:800, cursor:"pointer", fontFamily:"inherit", fontSize:13 }}>{editing?"Save Changes":"Add Job"}</button>
