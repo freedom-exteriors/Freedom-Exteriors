@@ -47,7 +47,19 @@ export interface EstimateLineInput {
   qty: string;
   unit: string;
   rate: string;
+  /** Browser only: where Claude got this line from. Never saved or printed. */
+  note?: string;
 }
+
+/** A photo or file attached to the estimate (stored like invoice uploads). */
+export const ATTACHMENT_EXTS = ["pdf", "png", "jpg", "docx"] as const;
+export type AttachmentExt = (typeof ATTACHMENT_EXTS)[number];
+export interface EstimateAttachment {
+  uploadId: string;
+  ext: AttachmentExt;
+  fileName: string;
+}
+export const MAX_ATTACHMENTS = 20;
 
 export interface EstimateFormInput {
   customerName: string;
@@ -65,6 +77,7 @@ export interface EstimateFormInput {
   overheadPercent: string;
   profitPercent: string;
   paymentTerms: string;
+  attachments?: EstimateAttachment[];
 }
 
 /** One stored line (estimates.items jsonb). */
@@ -99,6 +112,7 @@ export interface CleanEstimate {
   profit_percent: string | null;
   profit_cents: number;
   total_cents: number;
+  attachments: EstimateAttachment[];
 }
 
 export interface EstimateRow extends Omit<CleanEstimate, "overhead_percent" | "profit_percent"> {
@@ -129,6 +143,23 @@ function obj(v: unknown): Record<string, unknown> {
   return v && typeof v === "object" ? (v as Record<string, unknown>) : {};
 }
 const isUuidLike = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+
+/** Keeps only well-formed attachment entries (the browser sends these back as-is). */
+export function cleanAttachments(v: unknown): EstimateAttachment[] {
+  if (!Array.isArray(v)) return [];
+  const seen = new Set<string>();
+  const out: EstimateAttachment[] = [];
+  for (const raw of v) {
+    const a = obj(raw);
+    const uploadId = str(a.uploadId);
+    const ext = str(a.ext);
+    if (!isUuidLike(uploadId) || !(ATTACHMENT_EXTS as readonly string[]).includes(ext) || seen.has(uploadId)) continue;
+    seen.add(uploadId);
+    out.push({ uploadId: uploadId.toLowerCase(), ext: ext as AttachmentExt, fileName: str(a.fileName, 200) || `file.${ext}` });
+    if (out.length === MAX_ATTACHMENTS) break;
+  }
+  return out;
+}
 
 export function validateEstimateInput(body: unknown): { ok: true; value: CleanEstimate } | { ok: false; errors: string[] } {
   const b = obj(body);
@@ -213,6 +244,7 @@ export function validateEstimateInput(body: unknown): { ok: true; value: CleanEs
       profit_percent: profitH ? (profitH / 100).toFixed(2) : null,
       profit_cents: cost.profitCents,
       total_cents: cost.contractTotalCents,
+      attachments: cleanAttachments(b.attachments),
     },
   };
 }
@@ -252,6 +284,7 @@ export function estimateToForm(e: EstimateRow): EstimateFormInput {
     overheadPercent: pctText(e.overhead_percent),
     profitPercent: pctText(e.profit_percent),
     paymentTerms: e.payment_terms ?? "",
+    attachments: e.attachments ?? [],
   };
 }
 

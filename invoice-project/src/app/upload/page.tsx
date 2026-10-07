@@ -5,35 +5,15 @@ import { InvoiceForm } from "@/components/InvoiceForm";
 import type { InvoiceFormInput } from "@/lib/invoice";
 import type { ReviewDraft } from "@/lib/review";
 import { api } from "@/lib/clientApi";
+import { UPLOAD_ACCEPT, uploadFile, type UploadExt } from "@/lib/uploadClient";
 
-const MAX_BYTES = 20 * 1024 * 1024;
-type Ext = "pdf" | "png" | "jpg" | "docx";
-const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+type Ext = UploadExt;
 
 type Stage =
   | { name: "pick" }
   | { name: "working"; message: string }
   | { name: "review"; uploadId: string; ext: Ext; fileName: string; viewUrl: string; draft: ReviewDraft; previewText: string | null }
   | { name: "saved"; id: string; invoiceNumber: string; duplicate: boolean };
-
-function extOf(file: File): Ext | "heic" | "doc" | null {
-  const name = file.name.toLowerCase();
-  if (file.type === DOCX_MIME || name.endsWith(".docx")) return "docx";
-  if (name.endsWith(".doc")) return "doc";
-  if (file.type === "application/pdf" || name.endsWith(".pdf")) return "pdf";
-  if (file.type === "image/png" || name.endsWith(".png")) return "png";
-  if (file.type === "image/jpeg" || /\.jpe?g$/.test(name)) return "jpg";
-  if (/image\/hei[cf]/.test(file.type) || /\.hei[cf]$/.test(name)) return "heic";
-  return null;
-}
-
-/** iPhone photos (HEIC) are converted to JPG in the browser before upload. */
-async function heicToJpeg(file: File): Promise<File> {
-  const heic2any = (await import("heic2any")).default;
-  const out = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.9 });
-  const blob = Array.isArray(out) ? out[0] : out;
-  return new File([blob], file.name.replace(/\.hei[cf]$/i, "") + ".jpg", { type: "image/jpeg" });
-}
 
 export default function UploadPage() {
   const [stage, setStage] = useState<Stage>({ name: "pick" });
@@ -45,43 +25,8 @@ export default function UploadPage() {
   async function handleFile(original: File | undefined) {
     if (!original) return;
     setError("");
-    let ext = extOf(original);
-    let file = original;
-    if (ext === null) {
-      setError(`"${original.name}" isn't a PDF, Word (.docx), PNG, JPG or HEIC file. Save or export it as a PDF and try again.`);
-      return;
-    }
-    if (ext === "doc") {
-      setError(`"${original.name}" is an old-style Word file (.doc). Open it in Word, choose File → Save As → Word Document (.docx) or PDF, and upload that.`);
-      return;
-    }
     try {
-      if (ext === "heic") {
-        setStage({ name: "working", message: "Converting iPhone photo (HEIC) to JPG…" });
-        try {
-          file = await heicToJpeg(original);
-          ext = "jpg";
-        } catch {
-          throw new Error("This HEIC photo couldn't be converted. On your iPhone, open it and use Share → Save as JPEG (or take a screenshot), then upload that.");
-        }
-      }
-      if (file.size > MAX_BYTES) throw new Error(`This file is ${(file.size / 1048576).toFixed(1)} MB. The limit is 20 MB.`);
-      if (file.size === 0) throw new Error("This file is empty.");
-
-      setStage({ name: "working", message: "Uploading…" });
-      const { uploadId, signedUrl } = await api<{ uploadId: string; signedUrl: string }>("/api/uploads", {
-        method: "POST",
-        json: { ext, size: file.size, fileName: file.name },
-      });
-      const put = await fetch(signedUrl, {
-        method: "PUT",
-        headers: {
-          "Content-Type": { pdf: "application/pdf", png: "image/png", jpg: "image/jpeg", docx: DOCX_MIME }[ext as Ext],
-          "x-upsert": "false",
-        },
-        body: file,
-      });
-      if (!put.ok) throw new Error(`Upload failed (${put.status}). Try again.`);
+      const { uploadId, ext, file } = await uploadFile(original, (message) => setStage({ name: "working", message }));
 
       setStage({ name: "working", message: "Claude is reading the invoice. This can take up to a minute for long PDFs…" });
       const { draft, previewText } = await api<{ draft: ReviewDraft; previewText: string | null }>(`/api/uploads/${uploadId}/extract`, {
@@ -90,7 +35,7 @@ export default function UploadPage() {
       });
       const { url } = await api<{ url: string }>(`/api/uploads/${uploadId}/view?ext=${ext}`);
       setDocNumber(draft.documentInvoiceNumber);
-      setStage({ name: "review", uploadId, ext: ext as Ext, fileName: file.name, viewUrl: url, draft, previewText });
+      setStage({ name: "review", uploadId, ext, fileName: file.name, viewUrl: url, draft, previewText });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setStage({ name: "pick" });
@@ -203,7 +148,7 @@ export default function UploadPage() {
         >
           <p style={{ fontSize: 17, fontWeight: 700, color: "var(--teal)" }}>Drop a PDF or photo here, or click to choose</p>
           <p className="muted small">PDF, Word (.docx), PNG, JPG or iPhone HEIC · up to 20 MB · multi-page PDFs are fine</p>
-          <input type="file" accept=".pdf,.docx,.png,.jpg,.jpeg,.heic,.heif,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/png,image/jpeg,image/heic,image/heif" style={{ display: "none" }} onChange={(e) => handleFile(e.target.files?.[0])} />
+          <input type="file" accept={UPLOAD_ACCEPT} style={{ display: "none" }} onChange={(e) => handleFile(e.target.files?.[0])} />
         </label>
       )}
     </>

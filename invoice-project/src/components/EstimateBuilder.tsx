@@ -19,6 +19,7 @@ import {
   parseQuantityMilli,
 } from "@/lib/money";
 import { todayIso } from "@/lib/dates";
+import { EstimateFiles } from "./EstimateFiles";
 
 export function emptyEstimate(): EstimateFormInput {
   return {
@@ -36,6 +37,7 @@ export function emptyEstimate(): EstimateFormInput {
     overheadPercent: "",
     profitPercent: "",
     paymentTerms: estimatePaymentTerms(DEFAULT_VALID_DAYS),
+    attachments: [],
   };
 }
 
@@ -135,6 +137,8 @@ export function EstimateBuilder({ initial, priceBook, submitLabel, busy, onSubmi
 
   return (
     <form onSubmit={submit}>
+      <EstimateFiles form={form} priceBook={priceBook} onAttachments={(a) => set("attachments", a)} onMerged={setForm} />
+
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Customer &amp; job</h2>
         <div className="grid2">
@@ -219,6 +223,7 @@ export function EstimateBuilder({ initial, priceBook, submitLabel, busy, onSubmi
                 </div>
                 <button type="button" className="link" aria-label="Remove line" onClick={() => set("lines", form.lines.filter((_, j) => j !== i))}>✕</button>
               </div>
+              {row.note && <div className="muted small" style={{ margin: "2px 0 4px" }}>{row.note}</div>}
               {needsPrice && <div className="flag-note">⚠ Type a price for this line (it has no set price in the price book).</div>}
               <input value={row.detail} placeholder="Detail (optional small grey line)" onChange={(e) => updateLine(i, { detail: e.target.value })} style={{ fontSize: 13 }} />
             </div>

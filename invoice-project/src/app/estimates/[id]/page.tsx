@@ -8,6 +8,7 @@ import { addDays, toLongDate, toUsDate } from "@/lib/dates";
 import { api, openSigned } from "@/lib/clientApi";
 import { EmailPdf } from "@/components/EmailPdf";
 import { estimateEmail } from "@/lib/emailText";
+import { viewUpload } from "@/lib/uploadClient";
 
 type Loaded = { estimate: EstimateRow; invoiceNumber: string | null };
 
@@ -204,6 +205,20 @@ export default function EstimateDetail({ params }: { params: Promise<{ id: strin
           <div className="balance"><span>Total estimate</span><span>{formatCents(e.total_cents)}</span></div>
         </div>
       </div>
+
+      {(e.attachments ?? []).length > 0 && (
+        <div className="card">
+          <h2 style={{ marginTop: 0 }}>Photos &amp; files</h2>
+          <p className="muted small" style={{ marginTop: 0 }}>For your reference only. These don&apos;t go to the customer.</p>
+          <ul style={{ margin: 0 }}>
+            {e.attachments.map((a) => (
+              <li key={a.uploadId}>
+                <button type="button" className="link" onClick={() => viewUpload(a.uploadId, a.ext).catch((err) => setError(err.message))}>{a.fileName}</button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {e.payment_terms && (
         <div className="card">

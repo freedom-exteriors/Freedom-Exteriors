@@ -58,7 +58,9 @@ button, .btn {
 }
 button:hover, .btn:hover { background: var(--teal-dark); }
 button.secondary, .btn.secondary { background: #fff; color: var(--teal); }
-button.secondary:hover { background: #eef7f8; }
+button.secondary:hover, .btn.secondary:hover { background: #eef7f8; }
+label.btn { margin: 0; }
+.btn.disabled { opacity: .55; cursor: not-allowed; }
 button.danger { background: #fff; color: var(--error); border-color: var(--error); }
 button.link { background: none; border: none; color: var(--teal); padding: 4px; }
 button:disabled { opacity: .55; cursor: not-allowed; }

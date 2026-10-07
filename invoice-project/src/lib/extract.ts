@@ -147,31 +147,49 @@ async function prepareImage(data: Buffer, mime: "image/png" | "image/jpeg") {
 
 export class ExtractionError extends Error {}
 
-export async function extractInvoice(file: Buffer, mime: SupportedMime) {
-  if (!process.env.ANTHROPIC_API_KEY) throw new ExtractionError("ANTHROPIC_API_KEY is not configured on the server.");
-  const client = new Anthropic({ maxRetries: 2, timeout: 240_000 });
-
-  let block: Anthropic.Beta.BetaContentBlockParam;
-  // Word files: Claude reads their text (tables kept as "cell | cell" rows).
-  let text: string | null = null;
+/**
+ * Turns one stored file into a block Claude can read. Word files become
+ * their text (tables kept as "cell | cell" rows), which is also returned.
+ */
+export async function fileBlock(file: Buffer, mime: SupportedMime, title?: string): Promise<{ block: Anthropic.Beta.BetaContentBlockParam; text: string | null; bytes: number }> {
   if (mime === DOCX_MIME) {
+    let text: string;
     try {
       text = await docxToText(file);
     } catch (e) {
       if (e instanceof DocxError) throw new ExtractionError(e.message);
       throw e;
     }
-    block = {
-      type: "document",
-      title: "Uploaded Word document (text; table cells separated by |)",
-      source: { type: "text", media_type: "text/plain", data: text },
+    return {
+      block: { type: "document", title: title ?? "Uploaded Word document (text; table cells separated by |)", source: { type: "text", media_type: "text/plain", data: text } },
+      text,
+      bytes: text.length,
     };
-  } else if (mime === "application/pdf") {
-    block = { type: "document", source: { type: "base64", media_type: "application/pdf", data: file.toString("base64") } };
-  } else {
-    const img = await prepareImage(file, mime);
-    block = { type: "image", source: { type: "base64", media_type: img.mime, data: img.data.toString("base64") } };
   }
+  if (mime === "application/pdf") {
+    return {
+      block: { type: "document", ...(title ? { title } : {}), source: { type: "base64", media_type: "application/pdf", data: file.toString("base64") } },
+      text: null,
+      bytes: file.length,
+    };
+  }
+  const img = await prepareImage(file, mime);
+  return { block: { type: "image", source: { type: "base64", media_type: img.mime, data: img.data.toString("base64") } }, text: null, bytes: img.data.length };
+}
+
+/** Plain-English errors for Anthropic API failures. */
+export function apiErrorMessage(err: unknown): ExtractionError | null {
+  if (err instanceof Anthropic.BadRequestError) return new ExtractionError(`Claude could not read this file (${err.message}).`);
+  if (err instanceof Anthropic.AuthenticationError) return new ExtractionError("The Anthropic API key was rejected. Check ANTHROPIC_API_KEY.");
+  if (err instanceof Anthropic.RateLimitError) return new ExtractionError("Anthropic rate limit hit. Wait a minute and try again.");
+  if (err instanceof Anthropic.APIError) return new ExtractionError(`Anthropic API error ${err.status ?? ""}: ${err.message}`);
+  return null;
+}
+
+export async function extractInvoice(file: Buffer, mime: SupportedMime) {
+  if (!process.env.ANTHROPIC_API_KEY) throw new ExtractionError("ANTHROPIC_API_KEY is not configured on the server.");
+  const client = new Anthropic({ maxRetries: 2, timeout: 240_000 });
+  const { block, text } = await fileBlock(file, mime);
 
   let response: Anthropic.Beta.BetaMessage;
   try {
@@ -188,13 +206,7 @@ export async function extractInvoice(file: Buffer, mime: SupportedMime) {
       messages: [{ role: "user", content: [block, { type: "text", text: PROMPT }] }],
     });
   } catch (err) {
-    if (err instanceof Anthropic.BadRequestError) {
-      throw new ExtractionError(`Claude could not read this file (${err.message}).`);
-    }
-    if (err instanceof Anthropic.AuthenticationError) throw new ExtractionError("The Anthropic API key was rejected. Check ANTHROPIC_API_KEY.");
-    if (err instanceof Anthropic.RateLimitError) throw new ExtractionError("Anthropic rate limit hit. Wait a minute and try again.");
-    if (err instanceof Anthropic.APIError) throw new ExtractionError(`Anthropic API error ${err.status ?? ""}: ${err.message}`);
-    throw err;
+    throw apiErrorMessage(err) ?? err;
   }
 
   if (response.stop_reason === "refusal") throw new ExtractionError("Claude declined to read this document.");
