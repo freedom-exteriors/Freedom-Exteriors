@@ -426,9 +426,11 @@ export function exportPurchaseAgreement(data, job) {
   openPrint(`Purchase Agreement — ${trade.label}`, html);
 }
 
-export function exportCommissionWorkbook(data, job, isParLead) {
+// lead: leadSource(job) from CommissionWorkbook — null when no lead fee is owed.
+export function exportCommissionWorkbook(data, job, lead) {
   data = escDeep(data);
   job = escDeep(job);
+  lead = lead ? escDeep(lead) : null;
   const fmt = n => isNaN(n)||n===0 ? "$0.00" : (n<0?"-$":"$")+Math.abs(n).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
   const gross = parseFloat(data.grossRevenue)||0;
   const opAlloc = gross*0.15;
@@ -439,9 +441,9 @@ export function exportCommissionWorkbook(data, job, isParLead) {
   const commNet = netRev-costs;
   const tier = parseFloat(data.tier)||30;
   const commission = commNet*(tier/100);
-  const parFee = isParLead ? commNet * 0.105 : 0;
-  const repNet = commission - parFee;
-  const finalCommission = isParLead ? repNet : commission;
+  const leadFee = lead ? commNet * 0.105 : 0;
+  const repNet = commission - leadFee;
+  const finalCommission = lead ? repNet : commission;
 
   const costRows = costKeys.map((k,i) => {
     const v = parseFloat(data[k])||0;
@@ -480,12 +482,12 @@ export function exportCommissionWorkbook(data, job, isParLead) {
         <tr style="font-weight:700"><td style="padding:6px 8px;font-size:10pt">U. Commissionable Net (C − T)</td><td style="padding:6px 8px;font-size:10pt;text-align:right;font-family:monospace">${fmt(commNet)}</td></tr>
         <tr><td style="padding:4px 8px;font-size:10pt">V. Commission Tier</td><td style="padding:4px 8px;font-size:10pt;text-align:right;font-weight:700">${tier}%</td></tr>
         <tr style="border-top:1px solid #eee"><td style="padding:4px 8px;font-size:10pt">W. Gross Commission (U × V)</td><td style="padding:4px 8px;font-size:10pt;text-align:right;font-family:monospace">${fmt(commission)}</td></tr>
-        ${isParLead ? `<tr style="color:#c00"><td style="padding:4px 8px;font-size:10pt">− PAR Fee (10.5% of net)</td><td style="padding:4px 8px;font-size:10pt;text-align:right;font-family:monospace">− ${fmt(parFee)}</td></tr>` : ""}
+        ${lead ? `<tr style="color:#c00"><td style="padding:4px 8px;font-size:10pt">− ${lead.short} Fee to ${lead.payee} (10.5% of net)</td><td style="padding:4px 8px;font-size:10pt;text-align:right;font-family:monospace">− ${fmt(leadFee)}</td></tr>` : ""}
       </table>
       <div style="background:#fffbea;border:2px solid #e8a820;border-radius:4px;padding:14px;text-align:center">
-        <div style="font-size:8pt;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#888;margin-bottom:6px">${isParLead ? "Rep Net Commission (after PAR fee)" : "Total Net Commission (U × V)"}</div>
+        <div style="font-size:8pt;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#888;margin-bottom:6px">${lead ? `Rep Net Commission (after ${lead.short} fee)` : "Total Net Commission (U × V)"}</div>
         <div style="font-size:26pt;font-weight:900;font-family:monospace;color:${finalCommission>=0?"#e8a820":"#e55"}">${fmt(finalCommission)}</div>
-        <div style="font-size:8.5pt;color:#666;margin-top:4px">${tier}% of ${fmt(commNet)} commissionable net${isParLead ? " less PAR fee" : ""}</div>
+        <div style="font-size:8.5pt;color:#666;margin-top:4px">${tier}% of ${fmt(commNet)} commissionable net${lead ? ` less ${lead.short} fee` : ""}</div>
       </div>
     </div></div>
     ${repSplitRows ? `<div class="section"><div class="section-title">Step 4 — Sales Rep Split</div><div class="section-body">
