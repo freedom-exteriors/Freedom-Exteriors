@@ -47,6 +47,7 @@ project) for generating, cataloging and exporting invoices. See
 | `STRIPE_SECRET_KEY`, `REACT_APP_STRIPE_PUBLISHABLE_KEY` | deposits |
 | `QB_CLIENT_ID`, `QB_CLIENT_SECRET` | QuickBooks (production keys). Optional `QB_ENVIRONMENT=sandbox`, `QB_ITEM_ID` |
 | `HOVER_CLIENT_ID`, `HOVER_CLIENT_SECRET` | Hover |
+| `HOVER_INTERNAL_API_KEY` | lets the separate bid-estimator app read Hover measurements through this CRM's existing connection (`api/hover.js?action=measurements`, via an `x-internal-api-key` header) instead of doing its own Hover OAuth login — the token stays owned in one place. Optional; only needed if that integration is in use. |
 | `ANTHROPIC_API_KEY` | scope review |
 | `GOOGLE_SOLAR_API_KEY` | roof size lookup |
 | `CRON_SECRET` | reminder cron |
