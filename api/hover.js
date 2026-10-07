@@ -64,7 +64,14 @@ export default async function handler(req, res) {
   }
 
   if (action === "measurements" && req.method === "GET") {
-    if (!(await requireStaff(req, res))) return;
+    // Server-to-server callers (the separate bid-estimator app) authenticate
+    // with a shared secret instead of a staff cookie -- it has no CRM staff
+    // session to send, and shouldn't get one just to read a measurement. This
+    // never does Hover's own OAuth login/callback: only reads the connection
+    // the CRM's staff already made, so the token stays owned in one place.
+    const internalKey = req.headers["x-internal-api-key"];
+    const isInternal = !!internalKey && !!process.env.HOVER_INTERNAL_API_KEY && internalKey === process.env.HOVER_INTERNAL_API_KEY;
+    if (!isInternal && !(await requireStaff(req, res))) return;
     const { hoverId } = req.query;
     if (!hoverId || !/^\d+$/.test(String(hoverId))) return res.status(400).json({ error: "Valid hoverId required" });
 
