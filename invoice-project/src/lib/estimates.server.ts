@@ -4,6 +4,7 @@ import { buildEstimateDocx } from "./docx/buildInvoiceDocx";
 import { docxFromEstimate } from "./docx/fromEstimate";
 import { parseDollarsToCents, parseQuantityMilli } from "./money";
 import { cleanSearch } from "./invoices.server";
+import { parseOurEstimateNumber } from "./estimateImport";
 import { yearOf } from "./invoice";
 import type { CleanEstimate, EstimateRow, EstimateStatus, PriceBookItem } from "./estimate";
 
@@ -48,6 +49,56 @@ export async function createEstimate(clean: CleanEstimate): Promise<{ id: string
 }
 
 export class EstimateLockedError extends Error {}
+
+/**
+ * Saves an OLD estimate after Nick reviewed it. Keeps the number printed on
+ * the document when there is one (adding -DUP if it's already taken),
+ * otherwise assigns the next FE-EST number.
+ */
+export async function createUploadedEstimate(u: {
+  clean: CleanEstimate;
+  documentEstimateNumber: string;
+  status: Exclude<EstimateStatus, "void">;
+  originalFilePath: string;
+  extractionJson: unknown;
+}): Promise<{ id: string; estimateNumber: string; duplicate: boolean; docxError: string | null }> {
+  const db = supabaseAdmin();
+  const printed = u.documentEstimateNumber.trim();
+
+  const { data: already } = await db.from("estimates").select("estimate_number").eq("original_file_path", u.originalFilePath).maybeSingle();
+  if (already) throw new EstimateLockedError(`This upload was already saved as ${already.estimate_number}.`);
+
+  const ours = printed ? parseOurEstimateNumber(printed) : null;
+  if (ours) {
+    const { error } = await db.rpc("bump_estimate_counter", { p_year: ours.year, p_number: ours.number });
+    if (error) throw new Error(error.message);
+  }
+
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const estimateNumber = printed
+      ? attempt === 0 ? printed : `${printed}-DUP${attempt === 1 ? "" : attempt}`
+      : await nextEstimateNumber(yearOf(u.clean.estimate_date));
+    const { data, error } = await db
+      .from("estimates")
+      .insert({
+        ...u.clean,
+        estimate_number: estimateNumber,
+        status: u.status,
+        accepted_date: u.status === "accepted" ? u.clean.estimate_date : null,
+        source: "uploaded",
+        document_estimate_number: printed || null,
+        original_file_path: u.originalFilePath,
+        extraction_json: u.extractionJson,
+      })
+      .select("id")
+      .single();
+    if (error?.code === "23505" && /estimate_number/.test(error.message)) continue;
+    if (error?.code === "23505") throw new EstimateLockedError("This upload was already saved.");
+    if (error || !data) throw new Error(error?.message ?? "Save failed");
+    return { id: data.id, estimateNumber, duplicate: printed !== "" && attempt > 0, docxError: await tryRender(data.id) };
+  }
+  throw new Error("Could not find a free estimate number for this document.");
+}
 
 export async function updateEstimate(id: string, clean: CleanEstimate): Promise<{ docxError: string | null }> {
   const existing = await loadEstimate(id);

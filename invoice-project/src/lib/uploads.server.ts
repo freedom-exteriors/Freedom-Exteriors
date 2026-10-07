@@ -21,6 +21,7 @@ export function uploadPaths(uploadId: string, ext: UploadExt) {
   return {
     original: `originals/${uploadId}/original.${ext}`,
     extraction: `extractions/${uploadId}.json`,
+    estimateExtraction: `estimate-extractions/${uploadId}.json`,
   };
 }
 

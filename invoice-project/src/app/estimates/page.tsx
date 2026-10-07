@@ -35,6 +35,7 @@ export default function EstimatesPage() {
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
         <h1 style={{ margin: 0, marginRight: "auto" }}>Estimates</h1>
         <Link className="btn" href="/estimates/new">+ New estimate</Link>
+        <Link className="btn secondary" href="/estimates/upload">Upload old estimate</Link>
       </div>
       <div className="filters est">
         <div>

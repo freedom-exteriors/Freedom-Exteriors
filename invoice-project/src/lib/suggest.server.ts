@@ -1,6 +1,6 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
-import { apiErrorMessage, EXTRACTION_MODEL, ExtractionError, fileBlock, type SupportedMime } from "./extract";
+import { ExtractionError, fileBlock, runTool, type SupportedMime } from "./extract";
 import { normalizeSuggestion, SUGGEST_BASES, type EstimateSuggestion } from "./estimateSuggest";
 import { formatCents } from "./money";
 import type { PriceBookItem } from "./estimate";
@@ -87,7 +87,6 @@ export interface SuggestFile {
 }
 
 export async function suggestEstimate(files: SuggestFile[], priceBook: PriceBookItem[], note: string) {
-  if (!process.env.ANTHROPIC_API_KEY) throw new ExtractionError("ANTHROPIC_API_KEY is not configured on the server.");
   const content: Anthropic.Beta.BetaContentBlockParam[] = [];
   let bytes = 0;
   for (const [i, f] of files.entries()) {
@@ -102,32 +101,10 @@ export async function suggestEstimate(files: SuggestFile[], priceBook: PriceBook
   }
   content.push({ type: "text", text: PROMPT(priceBook, note) });
 
-  const client = new Anthropic({ maxRetries: 2, timeout: 280_000 });
-  let response: Anthropic.Beta.BetaMessage;
-  try {
-    response = await client.beta.messages.create({
-      model: EXTRACTION_MODEL,
-      max_tokens: 16000,
-      betas: ["server-side-fallback-2026-07-01"],
-      fallbacks: "default",
-      output_config: { effort: "medium" },
-      tools: [SUGGEST_TOOL],
-      tool_choice: { type: "auto" },
-      messages: [{ role: "user", content }],
-    });
-  } catch (err) {
-    throw apiErrorMessage(err) ?? err;
-  }
-  if (response.stop_reason === "refusal") throw new ExtractionError("Claude declined to read these files.");
-  const call = response.content.find((b): b is Anthropic.Beta.BetaToolUseBlock => b.type === "tool_use" && b.name === SUGGEST_TOOL.name);
-  if (!call) {
-    throw new ExtractionError(
-      response.stop_reason === "max_tokens" ? "There was too much to read in one pass. Try fewer files at a time." : "Claude did not return estimate lines for these files.",
-    );
-  }
-  const suggestion: EstimateSuggestion = normalizeSuggestion(call.input);
+  const { input, raw } = await runTool(content, SUGGEST_TOOL, "these files");
+  const suggestion: EstimateSuggestion = normalizeSuggestion(input);
   // Only ids that really are in the price book survive; anything else becomes a custom line.
   const ids = new Set(priceBook.map((p) => p.id));
   for (const l of suggestion.lines) if (l.price_book_item_id && !ids.has(l.price_book_item_id)) l.price_book_item_id = null;
-  return { suggestion, raw: response };
+  return { suggestion, raw };
 }

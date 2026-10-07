@@ -71,9 +71,13 @@ interface Props {
   busy?: boolean;
   onSubmit: (form: EstimateFormInput) => void;
   onCancel?: () => void;
+  /** Extra card shown first (the old-estimate review puts its number and status here). */
+  extra?: React.ReactNode;
+  /** Hide the "Start from photos or files" box (old-estimate review). */
+  hideFiles?: boolean;
 }
 
-export function EstimateBuilder({ initial, priceBook, submitLabel, busy, onSubmit, onCancel }: Props) {
+export function EstimateBuilder({ initial, priceBook, submitLabel, busy, onSubmit, onCancel, extra, hideFiles }: Props) {
   const [form, setForm] = useState<EstimateFormInput>(initial);
   const [termsTouched, setTermsTouched] = useState(initial.paymentTerms !== estimatePaymentTerms(initial.validDays));
   const set = <K extends keyof EstimateFormInput>(k: K, v: EstimateFormInput[K]) => setForm((f) => ({ ...f, [k]: v }));
@@ -137,7 +141,8 @@ export function EstimateBuilder({ initial, priceBook, submitLabel, busy, onSubmi
 
   return (
     <form onSubmit={submit}>
-      <EstimateFiles form={form} priceBook={priceBook} onAttachments={(a) => set("attachments", a)} onMerged={setForm} />
+      {extra}
+      {!hideFiles && <EstimateFiles form={form} priceBook={priceBook} onAttachments={(a) => set("attachments", a)} onMerged={setForm} />}
 
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Customer &amp; job</h2>

@@ -100,6 +100,7 @@ export default function EstimateDetail({ params }: { params: Promise<{ id: strin
       </div>
       <p className="muted small">
         {e.customer_name} · {formatCents(e.total_cents)} · valid until {toLongDate(addDays(e.estimate_date, e.valid_days))}
+        {e.source === "uploaded" && <> · uploaded from an old estimate{e.document_estimate_number && e.document_estimate_number !== e.estimate_number ? ` (printed number ${e.document_estimate_number})` : ""}; the original is under Photos &amp; files</>}
       </p>
 
       {error && <div className="alert error">{error}</div>}

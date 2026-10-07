@@ -186,11 +186,13 @@ export function apiErrorMessage(err: unknown): ExtractionError | null {
   return null;
 }
 
-export async function extractInvoice(file: Buffer, mime: SupportedMime) {
+/**
+ * Sends the content to Claude with one strict tool and returns the tool's
+ * input. `what` names the files in error messages ("this file", "these files").
+ */
+export async function runTool(content: Anthropic.Beta.BetaContentBlockParam[], tool: Anthropic.Beta.BetaTool, what = "this file") {
   if (!process.env.ANTHROPIC_API_KEY) throw new ExtractionError("ANTHROPIC_API_KEY is not configured on the server.");
-  const client = new Anthropic({ maxRetries: 2, timeout: 240_000 });
-  const { block, text } = await fileBlock(file, mime);
-
+  const client = new Anthropic({ maxRetries: 2, timeout: 280_000 });
   let response: Anthropic.Beta.BetaMessage;
   try {
     response = await client.beta.messages.create({
@@ -199,24 +201,29 @@ export async function extractInvoice(file: Buffer, mime: SupportedMime) {
       betas: ["server-side-fallback-2026-07-01"],
       fallbacks: "default",
       output_config: { effort: "medium" },
-      tools: [TOOL],
+      tools: [tool],
       // This model doesn't accept a forced tool_choice; the strict schema
       // plus the instruction gets a schema-valid call, and we check for it.
       tool_choice: { type: "auto" },
-      messages: [{ role: "user", content: [block, { type: "text", text: PROMPT }] }],
+      messages: [{ role: "user", content }],
     });
   } catch (err) {
     throw apiErrorMessage(err) ?? err;
   }
-
-  if (response.stop_reason === "refusal") throw new ExtractionError("Claude declined to read this document.");
-  const call = response.content.find((b): b is Anthropic.Beta.BetaToolUseBlock => b.type === "tool_use" && b.name === TOOL.name);
+  if (response.stop_reason === "refusal") throw new ExtractionError(`Claude declined to read ${what}.`);
+  const call = response.content.find((b): b is Anthropic.Beta.BetaToolUseBlock => b.type === "tool_use" && b.name === tool.name);
   if (!call) {
     throw new ExtractionError(
-      response.stop_reason === "max_tokens" ? "The document was too long to read in one pass." : "Claude did not return structured data for this file.",
+      response.stop_reason === "max_tokens" ? `There was too much in ${what} to read in one pass.` : `Claude did not return structured data for ${what}.`,
     );
   }
-  return { fields: normalizeFields(call.input), raw: response, text };
+  return { input: call.input, raw: response };
+}
+
+export async function extractInvoice(file: Buffer, mime: SupportedMime) {
+  const { block, text } = await fileBlock(file, mime);
+  const { input, raw } = await runTool([block, { type: "text", text: PROMPT }], TOOL);
+  return { fields: normalizeFields(input), raw, text };
 }
 
 /** "" (the schema's "not on the document") → null, recursively. */

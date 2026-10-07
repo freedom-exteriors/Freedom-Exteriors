@@ -123,6 +123,9 @@ export interface EstimateRow extends Omit<CleanEstimate, "overhead_percent" | "p
   profit_percent: number | string | null;
   invoice_id: string | null;
   accepted_date: string | null;
+  /** "uploaded" = an old estimate read from a document. */
+  source?: "built" | "uploaded";
+  document_estimate_number?: string | null;
   generated_file_path: string | null;
   created_at: string;
   updated_at: string;
