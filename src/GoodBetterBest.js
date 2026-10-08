@@ -12,21 +12,37 @@ const DEFAULT_PRICING = {
   baseGood: 650,
   baseBetter: 750,
   baseBest: 850,
-  // Pitch surcharge bands — % added to base, keyed by max pitch in the band (12 = 12/12)
-  // Based on MN roofing labor data: 3/12–8/12 is baseline walkable pitch; steeper
-  // pitches require roof jacks, then harnesses, then scaffolding as slope increases.
+  // Pitch surcharge bands — % added to base, keyed by max pitch in the band (12 = 12/12).
+  // Sourced from E&R Roofing's 2026 price list, "Architectural Shingles"
+  // (re-roof) column, not "New Construction" — pct is each pitch's $/SQ
+  // rate vs. the $115/SQ baseline (3/12–7/12), e.g. 8/12 = $120/SQ = +4.35%.
+  // E&R's list starts at 4/12; 3/12 is folded into the baseline band since
+  // it isn't priced separately there and is generally walkable-equivalent.
+  // Below 4/12 isn't in E&R's shingle list at all (that's TPO/EPDM/low-slope
+  // territory) — that band's 20% is the prior unsourced placeholder, not
+  // from this document.
   pitchBands: [
-    { maxPitch: 2,  label: "0/12 – 2/12 (Low slope — different underlayment)", pct: 20 },
-    { maxPitch: 8,  label: "3/12 – 8/12 (Standard, walkable)",                 pct: 0  },
-    { maxPitch: 10, label: "9/12 – 10/12 (Roof jacks required)",               pct: 15 },
-    { maxPitch: 12, label: "11/12 – 12/12 (Harness required)",                 pct: 25 },
-    { maxPitch: 99, label: "13/12+ (Scaffolding required)",                    pct: 45 },
+    { maxPitch: 2,  label: "0/12 – 2/12 (Low slope — different underlayment)",  pct: 20 },
+    { maxPitch: 7,  label: "3/12 – 7/12 (Standard, walkable)",                  pct: 0 },
+    { maxPitch: 8,  label: "8/12",                                              pct: 4.35 },
+    { maxPitch: 9,  label: "9/12",                                              pct: 8.70 },
+    { maxPitch: 10, label: "10/12 (Roof jacks required)",                       pct: 13.04 },
+    { maxPitch: 11, label: "11/12",                                            pct: 21.74 },
+    { maxPitch: 12, label: "12/12 (Harness required)",                         pct: 30.43 },
+    { maxPitch: 14, label: "13/12 – 14/12",                                    pct: 39.13 },
+    { maxPitch: 99, label: "15/12+ (Scaffolding required — E&R's 16/12 rate)", pct: 56.52 },
   ],
-  // Story surcharge — % added to base for staging, ladder time, and harness setup
+  // Story surcharge — % added to base for staging, ladder time, and harness
+  // setup. E&R prices this as a flat +$10.00/SQ per additional story; as a %
+  // of the $115/SQ baseline that's +8.70% per story above the first. This
+  // 3-band model caps at "3+" (2 extra stories = +17.39%), so a literal
+  // 4-story home would still price at the 3+ rate rather than continuing to
+  // scale linearly — a known simplification of this band structure, not
+  // something E&R's list itself caps.
   storyBands: [
-    { stories: 1, label: "1 Story",  pct: 0  },
-    { stories: 2, label: "2 Story",  pct: 12 },
-    { stories: 3, label: "3+ Story", pct: 25 },
+    { stories: 1, label: "1 Story",  pct: 0 },
+    { stories: 2, label: "2 Story",  pct: 8.70 },
+    { stories: 3, label: "3+ Story", pct: 17.39 },
   ],
   wasteFactorPct: 10, // % added to measured area for cuts/waste
 };
