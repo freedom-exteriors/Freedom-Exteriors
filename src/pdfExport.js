@@ -139,7 +139,7 @@ export function exportContractorAgreement(data, job) {
   const html = `
     <div class="doc-title"><h1>Inspection / Contingency Agreement</h1></div>
     <div class="section"><div class="section-title">Property Information</div><div class="section-body">
-      <div class="grid2">${field("Property Address", data.propertyAddress)}${field("Date of Loss", data.dateOfLoss)}</div>
+      <div class="grid3">${field("Homeowner Name", data.homeownerName)}${field("Property Address", data.propertyAddress)}${field("Date of Loss", data.dateOfLoss)}</div>
     </div></div>
     <div class="section"><div class="section-title">Services Provided</div><div class="section-body">
       <div class="notice-box teal"><strong>Homeowner has hired Freedom Exteriors LLC to:</strong><ul style="margin:6px 0 0 16px;line-height:1.8">

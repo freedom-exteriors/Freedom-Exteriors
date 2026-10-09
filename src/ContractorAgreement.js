@@ -75,6 +75,7 @@ function SignatureBox({ label, signature, onSign, onClear }) {
 
 const blank = (job) => ({
   type: "contractor-agreement",
+  homeownerName: job.name || "",
   propertyAddress: job.address ? `${job.address}, ${job.city||""}, ${job.state||""}`.trim().replace(/,\s*$/,"") : "",
   dateOfLoss: "",
   homeownerSignature: null,
@@ -95,7 +96,7 @@ export default function ContractorAgreement({ job, onSave, onClose }) {
       <div style={{ position:"sticky", top:0, background:PANEL2, borderBottom:`1px solid ${BORDER}`, padding:"14px 18px", display:"flex", alignItems:"center", justifyContent:"space-between", zIndex:5 }}>
         <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800, fontSize:17, letterSpacing:1 }}>
           <span style={{ color:TEAL }}>FREEDOM </span><span style={{ color:GOLD }}>EXTERIORS</span>
-          <span style={{ color:MUTED, fontWeight:500, fontSize:13, marginLeft:10 }}>Inspection Agreement</span>
+          <span style={{ color:MUTED, fontWeight:500, fontSize:13, marginLeft:10 }}>Consignment</span>
         </div>
         <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap" }}>
           {savedFlash && <span style={{ color:TEAL, fontSize:12, fontWeight:700 }}>✓ Saved</span>}
@@ -114,6 +115,9 @@ export default function ContractorAgreement({ job, onSave, onClose }) {
 
         <div style={{ background:PANEL, border:`1px solid ${BORDER}`, borderRadius:10, padding:18, marginBottom:16 }}>
           <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800, fontSize:14, color:GOLD, marginBottom:14, textTransform:"uppercase", letterSpacing:1 }}>Property Information</div>
+          <div style={{ marginBottom:14 }}>
+            <Field label="Homeowner Name" value={data.homeownerName} onChange={set("homeownerName")} />
+          </div>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
             <Field label="Property Address" value={data.propertyAddress} onChange={set("propertyAddress")} />
             <Field label="Date of Loss" value={data.dateOfLoss} onChange={set("dateOfLoss")} type="date" />
