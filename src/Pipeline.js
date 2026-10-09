@@ -17,6 +17,7 @@ import { roofMeasurements } from "./measurements";
 import QuickQuote from "./QuickQuote";
 import ScopeReview from "./ScopeReview";
 import { compressImage, uploadJobPhoto, usePhotoUrls, deleteJobPhotoFiles, movePhotosToStorage } from "./photos";
+import { uploadJobDocument, useDocumentUrls, deleteJobDocumentFiles } from "./documents";
 /* eslint-disable react-hooks/exhaustive-deps */
 const TEAL = "#1a9e99"; const GOLD = "#e8a820"; const DARK = "#080d14";
 // The invoice tool (invoice-project): estimates, itemized invoices, PDFs, QuickBooks.
@@ -571,6 +572,9 @@ export default function Pipeline({ session }) {
   const [pendingPhotos, setPendingPhotos] = useState([]);
   useEffect(() => { setPendingPhotos([]); }, [selected?.id]);
   const photoUrls = usePhotoUrls(selected?.photos);
+  const documentUrls = useDocumentUrls(selected?.signedDocuments);
+  const [documentUploading, setDocumentUploading] = useState(false);
+  const [documentError, setDocumentError] = useState(null);
   const [pricing, setPricing] = useState(DEFAULT_PRICING);
   const [materialsCatalog, setMaterialsCatalog] = useState([]);
   const [abcFilter, setAbcFilter] = useState("All");
@@ -705,10 +709,11 @@ export default function Pipeline({ session }) {
 
   const removeJob = id => {
     const job = jobs.find(j => j.id === id);
-    if (!window.confirm(`Delete ${job?.name || "this job"} and all its photos? This can't be undone.`)) return;
+    if (!window.confirm(`Delete ${job?.name || "this job"} and all its photos/documents? This can't be undone.`)) return;
     setJobs(prev => prev.filter(j => j.id !== id));
     deleteJobRow(id);
     deleteJobPhotoFiles(job).catch(e => console.warn("Couldn't delete photo files:", e));
+    deleteJobDocumentFiles((job?.signedDocuments || []).map(d => d.path).filter(Boolean)).catch(e => console.warn("Couldn't delete document files:", e));
     setSelected(null);
   };
 
@@ -769,6 +774,35 @@ export default function Pipeline({ session }) {
     setPendingPhotos(failed);
     setPhotoSaving(false);
     if (failed.length) alert(`${failed.length} photo${failed.length === 1 ? "" : "s"} didn't upload — check your signal and tap Save again.`);
+  };
+
+  // Paper-signed contracts/agreements: photographed or scanned, uploaded
+  // as-is (no compression — needs to stay legible) via the job-documents
+  // bucket. Each upload goes straight to storage + job.signedDocuments,
+  // no staging step (unlike photos, these are typically one file at a time).
+  const uploadSignedDocuments = async (jobId, files, label) => {
+    setDocumentUploading(true);
+    setDocumentError(null);
+    const saved = [];
+    const failed = [];
+    for (const file of Array.from(files)) {
+      try { saved.push(await uploadJobDocument(jobId, file, { label })); }
+      catch (e) { console.error("Document upload failed:", e); failed.push(file.name); }
+    }
+    if (saved.length) {
+      const job = jobs.find(j => j.id === jobId);
+      updateJob(jobId, { signedDocuments: [...(job?.signedDocuments || []), ...saved] });
+    }
+    setDocumentUploading(false);
+    if (failed.length) setDocumentError(`${failed.length === 1 ? failed[0] : `${failed.length} files`} didn't upload — check your signal and try again.`);
+  };
+
+  const removeSignedDocument = (jobId, docId) => {
+    const job = jobs.find(j => j.id === jobId);
+    const doc = (job?.signedDocuments || []).find(d => d.id === docId);
+    if (!doc || !window.confirm(`Remove "${doc.name}"? This can't be undone.`)) return;
+    updateJob(jobId, { signedDocuments: (job.signedDocuments || []).filter(d => d.id !== docId) });
+    deleteJobDocumentFiles([doc.path]).catch(e => console.warn("Couldn't delete document file:", e));
   };
 
   const [photoMove, setPhotoMove] = useState(null);
@@ -1397,6 +1431,34 @@ export default function Pipeline({ session }) {
                       <div key={doc.label} style={{ background:PANEL2, border:`1px solid ${BORDER}`, borderRadius:7, padding:"10px 12px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                         <div><div style={{ fontSize:12, fontWeight:600 }}>{doc.label}</div><div style={{ fontSize:10, color:MUTED }}>{doc.desc}</div></div>
                         <span style={{ fontSize:10, color:TEAL, fontWeight:700, background:TEAL+"22", borderRadius:4, padding:"2px 8px", flexShrink:0, marginLeft:8 }}>On File</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div style={{ fontSize:10, color:MUTED, textTransform:"uppercase", letterSpacing:1, marginBottom:8, paddingTop:16, borderTop:`1px solid ${BORDER}` }}>Signed Documents (Paper)</div>
+                  <div style={{ color:MUTED, fontSize:11, marginBottom:10 }}>For anything signed on paper instead of in-app — photograph or scan it and upload here.</div>
+                  <label style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:10, cursor:documentUploading?"wait":"pointer", background:PANEL2, border:`2px dashed ${BORDER}`, borderRadius:9, padding:"16px", marginBottom:12 }}>
+                    <input type="file" accept="application/pdf,image/*" multiple disabled={documentUploading} style={{ display:"none" }}
+                      onChange={e => { if (e.target.files?.length) uploadSignedDocuments(selected.id, e.target.files, "Signed document"); e.target.value = ""; }}/>
+                    <span style={{ fontSize:24 }}>🖊️</span>
+                    <div><div style={{ fontWeight:700, fontSize:14 }}>{documentUploading ? "Uploading…" : "Upload Signed Document"}</div><div style={{ color:MUTED, fontSize:11 }}>Photo or PDF of a paper-signed contract/agreement</div></div>
+                  </label>
+                  {documentError && <div style={{ color:"#f87171", fontSize:12, marginBottom:10 }}>{documentError}</div>}
+
+                  {(selected.signedDocuments||[]).length === 0 && <div style={{ textAlign:"center", color:MUTED, padding:"16px 0" }}>No paper-signed documents uploaded yet.</div>}
+                  <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                    {(selected.signedDocuments||[]).map(doc => (
+                      <div key={doc.id} style={{ background:PANEL2, border:`1px solid ${BORDER}`, borderRadius:7, padding:"10px 12px", display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
+                        <div style={{ minWidth:0 }}>
+                          <div style={{ fontSize:12, fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{doc.isImage ? "📷" : "📄"} {doc.name}</div>
+                          <div style={{ fontSize:10, color:MUTED }}>Uploaded {new Date(doc.added).toLocaleDateString()}</div>
+                        </div>
+                        <div style={{ display:"flex", gap:6, flexShrink:0 }}>
+                          {documentUrls[doc.id]
+                            ? <a href={documentUrls[doc.id]} target="_blank" rel="noopener noreferrer" style={{ background:TEAL+"22", border:`1px solid ${TEAL}`, color:TEAL, borderRadius:6, padding:"6px 10px", fontSize:11, fontWeight:700, textDecoration:"none" }}>View</a>
+                            : <span style={{ color:MUTED, fontSize:11 }}>Loading…</span>}
+                          {isAdmin && <button onClick={() => removeSignedDocument(selected.id, doc.id)} style={{ background:"none", border:`1px solid #7c2d12`, color:"#f87171", borderRadius:6, padding:"6px 10px", fontSize:11, cursor:"pointer", fontFamily:"inherit" }}>✕</button>}
+                        </div>
                       </div>
                     ))}
                   </div>
