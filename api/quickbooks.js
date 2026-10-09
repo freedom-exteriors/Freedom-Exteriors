@@ -1,10 +1,10 @@
 // QuickBooks Online: connect (OAuth) and create an invoice for a job.
 // Tokens live server-side in integration_tokens — never in the browser or a URL.
-//   POST ?action=start    (admin)  -> { url } to send the browser to Intuit
+//   POST ?action=start    (owner)  -> { url } to send the browser to Intuit
 //   GET  ?action=callback (Intuit) -> stores tokens, back to the app
-//   GET  ?action=status   (admin)  -> { connected, company }
-//   POST ?action=invoice  (admin)  { jobId } -> { invoiceId, docNumber }
-//   POST ?action=disconnect (admin)
+//   GET  ?action=status   (owner)  -> { connected, company }
+//   POST ?action=invoice  (owner)  { jobId } -> { invoiceId, docNumber }
+//   POST ?action=disconnect (owner)
 // Called by the invoice tool (invoice-project) with the shared
 // x-invoice-tool-key header instead of a staff login; see _lib/invoiceTool.js:
 //   POST ?action=tool-job     { jobId }  -> the job's customer details
@@ -35,6 +35,7 @@ export default async function handler(req, res) {
 
   const staff = await requireStaff(req, res, { role: "admin" });
   if (!staff) return;
+  if (!staff.is_owner) return res.status(403).json({ error: "QuickBooks connection management is restricted to the owner." });
   if (!process.env.QB_CLIENT_ID || !process.env.QB_CLIENT_SECRET) {
     return res.status(500).json({ error: "QuickBooks keys aren't set up on the server" });
   }

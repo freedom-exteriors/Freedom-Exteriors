@@ -27,7 +27,7 @@ export async function requireStaff(req, res, { role } = {}) {
   const email = userData?.user?.email?.toLowerCase();
   if (error || !email) { res.status(403).json({ error: "Session expired — sign in again" }); return null; }
 
-  const { data: staff } = await db.from("staff").select("email,name,role").eq("email", email).maybeSingle();
+  const { data: staff } = await db.from("staff").select("email,name,role,is_owner").eq("email", email).maybeSingle();
   if (!staff || (role && staff.role !== role)) { res.status(403).json({ error: "Not allowed" }); return null; }
   return staff;
 }

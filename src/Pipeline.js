@@ -524,7 +524,7 @@ export default function Pipeline({ session }) {
     (async () => {
       let data, error;
       for (let i = 0; i < 3; i++) {
-        ({ data, error } = await supabase.from("staff").select("email,name,role"));
+        ({ data, error } = await supabase.from("staff").select("email,name,role,is_owner"));
         if (!error) break;
         if (i < 2) await new Promise(r => setTimeout(r, 1000 * (i + 1)));
       }
@@ -672,6 +672,9 @@ export default function Pipeline({ session }) {
 
   const userEmail = session?.user?.email;
   const isAdmin = staffProfile?.role === "admin";
+  // Owner-only: Pricing, Materials Catalog, QuickBooks connect, Delete Job.
+  // Everything else admin-gates on isAdmin (e.g. Scope Review, New Estimate/Invoice).
+  const isOwner = staffProfile?.is_owner === true;
 
   const filtered = jobs.filter(j => {
     if (filterStage !== "all" && j.stage !== filterStage) return false;
@@ -836,9 +839,9 @@ export default function Pipeline({ session }) {
   // QuickBooks: tokens stay on the server; the app only asks for status / actions.
   const [qbStatus, setQbStatus] = useState(null);
   useEffect(() => {
-    if (!isAdmin) return;
+    if (!isOwner) return;
     apiFetch("/api/quickbooks?action=status").then(r => r.json()).then(setQbStatus).catch(() => setQbStatus(null));
-  }, [isAdmin]);
+  }, [isOwner]);
   const connectQuickBooks = async () => {
     if (qbStatus?.connected && !window.confirm(`QuickBooks is connected${qbStatus.company ? ` to ${qbStatus.company}` : ""}. Reconnect (e.g. to switch companies)?`)) return;
     const res = await apiFetch("/api/quickbooks?action=start", { method: "POST" });
@@ -901,10 +904,10 @@ export default function Pipeline({ session }) {
               🔔 {followUps.length}
             </button>
           )}
-          {!isMobile && isAdmin && <button onClick={() => setPricingSettingsOpen(true)} style={{ background:"none", border:"1px solid #fbbf24", color:"#fbbf24", borderRadius:8, padding:"8px 14px", fontWeight:700, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>📐 Pricing</button>}
-          {!isMobile && isAdmin && <button onClick={() => setMaterialsCatalogOpen(true)} style={{ background:"none", border:"1px solid #a78bfa", color:"#a78bfa", borderRadius:8, padding:"8px 14px", fontWeight:700, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>🧱 Materials</button>}
+          {!isMobile && isOwner && <button onClick={() => setPricingSettingsOpen(true)} style={{ background:"none", border:"1px solid #fbbf24", color:"#fbbf24", borderRadius:8, padding:"8px 14px", fontWeight:700, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>📐 Pricing</button>}
+          {!isMobile && isOwner && <button onClick={() => setMaterialsCatalogOpen(true)} style={{ background:"none", border:"1px solid #a78bfa", color:"#a78bfa", borderRadius:8, padding:"8px 14px", fontWeight:700, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>🧱 Materials</button>}
           {staffProfile && <button onClick={() => setQuickQuoteOpen(true)} title="Quick Quote" style={{ background:"none", border:"1px solid #38bdf8", color:"#38bdf8", borderRadius:8, padding:isMobile?"6px 10px":"8px 14px", fontWeight:700, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>🧮{!isMobile && " Quick Quote"}</button>}
-          {isAdmin && <button onClick={connectQuickBooks} title={qbStatus?.connected ? `QuickBooks connected${qbStatus.company ? ": " + qbStatus.company : ""}` : "Connect QuickBooks"} style={{ background:"none", border:"1px solid #2CA01C", color:"#2CA01C", borderRadius:8, padding:isMobile?"6px 10px":"8px 14px", fontWeight:700, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>{qbStatus?.connected ? "✓ QB" : "🔗 QB"}</button>}
+          {isOwner && <button onClick={connectQuickBooks} title={qbStatus?.connected ? `QuickBooks connected${qbStatus.company ? ": " + qbStatus.company : ""}` : "Connect QuickBooks"} style={{ background:"none", border:"1px solid #2CA01C", color:"#2CA01C", borderRadius:8, padding:isMobile?"6px 10px":"8px 14px", fontWeight:700, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>{qbStatus?.connected ? "✓ QB" : "🔗 QB"}</button>}
           <button onClick={() => supabase.auth.signOut()} style={{ background:"none", border:`1px solid ${BORDER}`, color:MUTED, borderRadius:8, padding:isMobile?"6px 10px":"8px 14px", fontWeight:700, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>{isMobile?"↪":"Sign Out"}</button>
           <button onClick={openNew} style={{ background:GOLD, color:"#000", border:"none", borderRadius:8, padding:isMobile?"8px 14px":"8px 18px", fontWeight:800, fontSize:isMobile?12:13, cursor:"pointer", fontFamily:"inherit" }}>+ {isMobile?"New":"NEW JOB"}</button>
         </div>
@@ -1243,7 +1246,7 @@ export default function Pipeline({ session }) {
                       : <button onClick={() => openInvoiceTool(selected, "invoice")} style={{ background:"#2CA01C22", border:"1px solid #2CA01C", color:"#2CA01C", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>🧾 New Invoice ↗</button>)}
                     {selected.installDate && <button onClick={() => openGoogleCalendar(selected)} style={{ background:"#1a73e822", border:"1px solid #1a73e8", color:"#1a73e8", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>📅 Add to Calendar</button>}
                     {selected.hoverId && <button onClick={() => fetchHoverMeasurements(selected)} style={{ background:"#ff6b2222", border:"1px solid #ff6b22", color:"#ff6b22", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>📐 Fetch Measurements</button>}
-                    {isAdmin && <button onClick={() => removeJob(selected.id)} style={{ background:"#7c2d1222", border:"1px solid #7c2d12", color:"#f87171", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13 }}>🗑️ Delete</button>}
+                    {isOwner && <button onClick={() => removeJob(selected.id)} style={{ background:"#7c2d1222", border:"1px solid #7c2d12", color:"#f87171", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13 }}>🗑️ Delete</button>}
                   </div>
                   <EagleViewImport key={selected.id} job={selected} onImported={m => updateJob(selected.id, { eagleviewMeasurements: m })} onPatch={patch => updateJob(selected.id, patch)} />
                 </div>

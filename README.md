@@ -63,6 +63,20 @@ give a secret that prefix unless it's meant to be public.
 2. Add a row to the `staff` table with their email, name (must match the
    "Assigned To" name on their jobs) and role `rep` or `admin`.
 
+`admin` unlocks Scope Review, New Estimate, and New Invoice (plus every job,
+not just their own assigned ones). A second column, `is_owner` (boolean,
+default `false`), gates the smaller set of things that stay Nick-only even
+for other admins: Pricing settings, Materials Catalog editing, QuickBooks
+connect, and Delete Job. These are enforced in two places, not just the UI
+button — set `is_owner = true` on the `staff` row for anyone who should
+genuinely have them:
+- Postgres RLS on `jobs`: `is_owner()` gates the DELETE policy entirely, and
+  the UPDATE policy for the two reserved config rows (`job_id` -1 Pricing,
+  -2 Materials Catalog — `job_id` -3, the Scope Review reference library,
+  stays admin-level since Scope Review itself is meant to be used fully).
+- `api/quickbooks.js`: every staff-facing action (`start`/`status`/`invoice`/
+  `disconnect`) checks `staff.is_owner` after `requireStaff`.
+
 ## Local development
 
 ```
