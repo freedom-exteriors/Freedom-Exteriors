@@ -3,6 +3,9 @@ import JSZip from "jszip";
 import { buildInvoiceDocx, docxPlainText } from "@/lib/docx/buildInvoiceDocx";
 import { COMPANY, MN_LICENSE, WI_LICENSE } from "@/lib/company";
 import { sampleDocxInput, SAMPLE_FORM } from "./fixtures/sampleInvoice";
+import { docxFromInvoice } from "@/lib/docx/fromInvoice";
+import { buildInvoicePdf } from "@/lib/pdf/buildPdf";
+import { validateInvoiceInput, type InvoiceRow } from "@/lib/invoice";
 
 async function documentXml(buf: Buffer) {
   const zip = await JSZip.loadAsync(buf);
@@ -61,5 +64,31 @@ describe("generated invoice .docx", () => {
     expect(text).toContain(`$${(clean.balance_due_cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })}`);
     expect(text).toContain("Deposit Received - 08/14/2026 - Deposit at signing");
     expect(text).toContain("Change Order / Add-On - Replace 4 sheets rotted OSB decking");
+  });
+
+  it("a PAID invoice prints the final payment, $0.00 balance and PAID IN FULL", async () => {
+    const r = validateInvoiceInput(SAMPLE_FORM, "generated");
+    if (!r.ok) throw new Error(r.errors.join(" "));
+    const { items, reconcileWarning: _w, ...v } = r.value;
+    const balance = v.balance_due_cents;
+    expect(balance).toBeGreaterThan(0);
+    const paid = { ...v, invoice_number: "FE-INV-2026-001", status: "paid", paid_date: "2026-10-09" } as unknown as InvoiceRow;
+    const docx = docxFromInvoice(paid, items);
+    expect(docx.balanceDueCents).toBe(0);
+    expect(docx.finalPayment).toEqual({ date: "2026-10-09", amountCents: balance });
+    const text = docxPlainText(await documentXml(await buildInvoiceDocx(docx)));
+    expect(text).toContain("PAID IN FULL");
+    expect(text).toContain("Payment Received - 10/09/2026 - Final payment");
+    expect(text).toContain(`($${(balance / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })})`);
+    expect(text).toMatch(/BALANCE DUE\s*\$0\.00/);
+    expect(text).toContain("October 9, 2026");
+    // The PDF (what Email PDF sends) is built from the same data.
+    expect((await buildInvoicePdf(docx)).subarray(0, 5).toString()).toBe("%PDF-");
+
+    // Outstanding: unchanged.
+    const open = docxFromInvoice({ ...paid, status: "outstanding", paid_date: null }, items);
+    expect(open.balanceDueCents).toBe(balance);
+    expect(open.finalPayment).toBeNull();
+    expect(open.tag).not.toContain("PAID");
   });
 });

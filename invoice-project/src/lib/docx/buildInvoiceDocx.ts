@@ -115,8 +115,16 @@ export interface DocxInvoice {
   contractTotalCents: number;
   deposits: Array<{ date: string | null; description: string; amountCents: number }>;
   changeOrders: Array<{ description: string; amountCents: number }>;
+  /** Paid invoices: the rest of the balance, received on the paid date. */
+  finalPayment?: { date: string | null; amountCents: number } | null;
+  paidDate?: string | null;
   balanceDueCents: number;
   paymentTerms: string | null;
+}
+
+/** "Payment Received - 10/09/2026 - Final payment" */
+export function finalPaymentLabel(p: { date: string | null }): string {
+  return ["Payment Received", p.date ? toUsDate(p.date) : null, "Final payment"].filter(Boolean).join(" - ");
 }
 
 const NONE: IBorderOptions = { style: BorderStyle.NONE, size: 0, color: "auto" };
@@ -387,6 +395,7 @@ function accountSummary(inv: DocxInvoice): Array<Paragraph | Table> {
     rows.push(row(parts.join(" - "), `(${formatCents(d.amountCents)})`));
   }
   for (const c of inv.changeOrders) rows.push(row(`Change Order / Add-On - ${c.description}`, formatCents(c.amountCents)));
+  if (inv.finalPayment) rows.push(row(finalPaymentLabel(inv.finalPayment), `(${formatCents(inv.finalPayment.amountCents)})`));
   rows.push(row("BALANCE DUE", formatCents(inv.balanceDueCents), { balance: true }));
 
   return [heading("ACCOUNT SUMMARY", LAYOUT.headingSpacing.summary), table(LAYOUT.costTable, rows, GRID_TABLE_BORDERS)];
@@ -440,6 +449,7 @@ export async function buildInvoiceDocx(inv: DocxInvoice): Promise<Buffer> {
   const meta: Array<[string, string]> = [["Invoice #:", inv.invoiceNumber], ["Date:", toLongDate(inv.invoiceDate)]];
   if (inv.dueDate) meta.push(["Due Date:", toLongDate(inv.dueDate)]);
   if (inv.terms) meta.push(["Terms:", inv.terms]);
+  if (inv.paidDate) meta.push(["Paid:", toLongDate(inv.paidDate)]);
   const children: Array<Paragraph | Table> = [
     ...header(),
     titleRow("INVOICE", inv, meta),

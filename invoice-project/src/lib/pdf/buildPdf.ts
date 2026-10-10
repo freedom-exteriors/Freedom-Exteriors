@@ -3,7 +3,7 @@ import { COMPANY } from "../company";
 import { formatCents, formatPercent, formatQuantity } from "../money";
 import { toLongDate, toUsDate } from "../dates";
 import { LOGO } from "../docx/logo";
-import { addressLines, LAYOUT, showsBreakdown, type DocxEstimate, type DocxInvoice } from "../docx/buildInvoiceDocx";
+import { addressLines, finalPaymentLabel, LAYOUT, showsBreakdown, type DocxEstimate, type DocxInvoice } from "../docx/buildInvoiceDocx";
 
 // PDF version of the letterhead, for emailing. Same layout and the same
 // LAYOUT measurements as the .docx (converted to points), drawn directly
@@ -324,6 +324,7 @@ function accountSummary(f: Flow, inv: DocxInvoice) {
     rows.push(row(parts.join(" - "), `(${formatCents(d.amountCents)})`));
   }
   for (const c of inv.changeOrders) rows.push(row(`Change Order / Add-On - ${c.description}`, formatCents(c.amountCents)));
+  if (inv.finalPayment) rows.push(row(finalPaymentLabel(inv.finalPayment), `(${formatCents(inv.finalPayment.amountCents)})`));
   rows.push(row("BALANCE DUE", formatCents(inv.balanceDueCents), { balance: true }));
   // The whole summary stays on one page (as in the .docx).
   const h = rows.reduce((sum, r) => sum + rowHeight(f.doc, r), 0);
@@ -394,6 +395,7 @@ export function buildInvoicePdf(inv: DocxInvoice): Promise<Buffer> {
   const meta: Array<[string, string]> = [["Invoice #:", inv.invoiceNumber], ["Date:", toLongDate(inv.invoiceDate)]];
   if (inv.dueDate) meta.push(["Due Date:", toLongDate(inv.dueDate)]);
   if (inv.terms) meta.push(["Terms:", inv.terms]);
+  if (inv.paidDate) meta.push(["Paid:", toLongDate(inv.paidDate)]);
   return render(`Invoice ${inv.invoiceNumber}`, (f) => {
     header(f);
     titleRow(f, "INVOICE", inv, meta);

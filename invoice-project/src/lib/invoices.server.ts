@@ -219,6 +219,12 @@ export async function setStatus(id: string, status: InvoiceStatus, paidDate: str
     .select("id, status, paid_date")
     .maybeSingle();
   if (error) throw new Error(error.message);
+  // Paid/unpaid changes what the letterhead prints (PAID IN FULL, $0.00
+  // balance), so rebuild our own .docx. The PDF is always built fresh.
+  if (data && inv.source === "generated" && (status === "paid" || inv.status === "paid")) {
+    const fresh = await loadInvoice(id);
+    if (fresh) await renderAndStoreDocx(fresh.invoice, fresh.items).catch((e) => console.error("[set status] rebuilding .docx failed:", e));
+  }
   return data ? { ...data, qbNote } : null;
 }
 
