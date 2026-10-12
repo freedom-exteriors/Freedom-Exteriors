@@ -137,9 +137,10 @@ export function exportContractorAgreement(data, job) {
   data = escDeep(data);
   job = escDeep(job);
   const html = `
-    <div class="doc-title"><h1>Inspection / Contingency Agreement</h1></div>
+    <div class="doc-title"><h1>Consignment Agreement</h1></div>
     <div class="section"><div class="section-title">Property Information</div><div class="section-body">
       <div class="grid2">${field("Property Address", data.propertyAddress)}${field("Date of Loss", data.dateOfLoss)}</div>
+      <div class="grid2">${field("Consignment Amount", data.consignmentAmount ? "$" + Number(data.consignmentAmount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "")}</div>
     </div></div>
     <div class="section"><div class="section-title">Services Provided</div><div class="section-body">
       <div class="notice-box teal"><strong>Homeowner has hired Freedom Exteriors LLC to:</strong><ul style="margin:6px 0 0 16px;line-height:1.8">
@@ -164,7 +165,7 @@ export function exportContractorAgreement(data, job) {
       ${data.homeowner2Signature ? `<div class="sig-block">${sigHtml(data.homeowner2Signature, "Co-Owner Signature")}</div>` : ""}
       <div class="sig-block">${sigHtml(data.repSignature, "Freedom Exteriors LLC Representative")}</div>
     </div></div>`;
-  openPrint("Inspection / Contingency Agreement", html);
+  openPrint("Consignment Agreement", html);
 }
 
 export function exportInsuranceContract(data, job) {

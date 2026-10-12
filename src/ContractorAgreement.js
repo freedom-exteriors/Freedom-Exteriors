@@ -77,6 +77,7 @@ const blank = (job) => ({
   type: "contractor-agreement",
   propertyAddress: job.address ? `${job.address}, ${job.city||""}, ${job.state||""}`.trim().replace(/,\s*$/,"") : "",
   dateOfLoss: "",
+  consignmentAmount: "",
   homeownerSignature: null,
   homeowner2Signature: null,
   repSignature: null,
@@ -95,7 +96,7 @@ export default function ContractorAgreement({ job, onSave, onClose }) {
       <div style={{ position:"sticky", top:0, background:PANEL2, borderBottom:`1px solid ${BORDER}`, padding:"14px 18px", display:"flex", alignItems:"center", justifyContent:"space-between", zIndex:5 }}>
         <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800, fontSize:17, letterSpacing:1 }}>
           <span style={{ color:TEAL }}>FREEDOM </span><span style={{ color:GOLD }}>EXTERIORS</span>
-          <span style={{ color:MUTED, fontWeight:500, fontSize:13, marginLeft:10 }}>Inspection Agreement</span>
+          <span style={{ color:MUTED, fontWeight:500, fontSize:13, marginLeft:10 }}>Consignment Agreement</span>
         </div>
         <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap" }}>
           {savedFlash && <span style={{ color:TEAL, fontSize:12, fontWeight:700 }}>✓ Saved</span>}
@@ -108,7 +109,7 @@ export default function ContractorAgreement({ job, onSave, onClose }) {
 
       <div style={{ maxWidth:720, margin:"0 auto", padding:18 }}>
         <div style={{ textAlign:"center", marginBottom:18 }}>
-          <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800, fontSize:22, letterSpacing:1, color:TEXT }}>INSPECTION / CONTINGENCY AGREEMENT</div>
+          <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800, fontSize:22, letterSpacing:1, color:TEXT }}>CONSIGNMENT AGREEMENT</div>
           <div style={{ color:MUTED, fontSize:13, marginTop:4 }}>Freedom Exteriors LLC · 1145 Summit Ave, Mahtomedi, MN 55115 · (651) 283-1689 · License #BC-810020</div>
         </div>
 
@@ -117,6 +118,7 @@ export default function ContractorAgreement({ job, onSave, onClose }) {
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
             <Field label="Property Address" value={data.propertyAddress} onChange={set("propertyAddress")} />
             <Field label="Date of Loss" value={data.dateOfLoss} onChange={set("dateOfLoss")} type="date" />
+            <Field label="Consignment Amount ($)" value={data.consignmentAmount} onChange={set("consignmentAmount")} type="number" placeholder="0.00" />
           </div>
         </div>
 
