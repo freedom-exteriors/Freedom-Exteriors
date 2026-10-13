@@ -700,6 +700,9 @@ export default function Pipeline({ session }) {
 
   const userEmail = session?.user?.email;
   const isAdmin = staffProfile?.role === "admin";
+  const isManager = staffProfile?.role === "manager";
+  // Commission/profit numbers: admins see every job; everyone else only their own.
+  const canSeeCommission = job => isAdmin || (!!job?.assigned && job.assigned === staffProfile?.name);
 
   const filtered = jobs.filter(j => {
     if (filterStage !== "all" && j.stage !== filterStage) return false;
@@ -1149,7 +1152,7 @@ export default function Pipeline({ session }) {
         <div style={{ padding:isMobile?8:16, maxWidth:900, margin:"0 auto" }}>
           <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800, fontSize:22, letterSpacing:1, marginBottom:16 }}>💰 Commission Workbook</div>
           <div style={{ display:"grid", gridTemplateColumns:isMobile?"1fr":"1fr 1fr", gap:16 }}>
-            {jobs.filter(j => j.estimate?.total > 0 || j.commission?.grossRevenue > 0).map(job => {
+            {jobs.filter(j => (j.estimate?.total > 0 || j.commission?.grossRevenue > 0) && canSeeCommission(j)).map(job => {
               const c = job.commission || {};
               const lead = leadSource(job);
               const r = calcCommission({ ...c, grossRevenue: c.grossRevenue || job.estimate?.total || 0 }, !!lead);
@@ -1273,7 +1276,7 @@ export default function Pipeline({ session }) {
                     <button onClick={() => setLienNoticeOpen(true)} style={{ background:"#f9731622", border:"1px solid #f97316", color:"#fb923c", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>⚖️ Lien Notice{selected.lienNotice?.ownerSignature ? " ✓" : ""}</button>
                     <button onClick={() => setCancellationNoticeOpen(true)} style={{ background:"#f8717122", border:"1px solid #f87171", color:"#f87171", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>📄 Cancellation Notice{selected.cancellationNotice?.companySignature ? " ✓" : ""}</button>
                     <button onClick={() => setDocsAckOpen(true)} style={{ background:"#e8a82022", border:`1px solid ${GOLD}`, color:GOLD, borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>📋 Docs Acknowledgement{selected.docsAcknowledgement?.homeownerSignature ? " ✓" : ""}</button>
-                    <button onClick={() => setCommissionOpen(true)} style={{ background:GREEN+"22", border:`1px solid ${GREEN}`, color:GREEN, borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>💰 Commission{selected.commission?.grossRevenue ? " ✓" : ""}</button>
+                    {canSeeCommission(selected) && <button onClick={() => setCommissionOpen(true)} style={{ background:GREEN+"22", border:`1px solid ${GREEN}`, color:GREEN, borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>💰 Commission{selected.commission?.grossRevenue ? " ✓" : ""}</button>}
                     <button onClick={() => setGbbOpen(true)} style={{ background:"#fbbf2422", border:"1px solid #fbbf24", color:"#fbbf24", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>📐 Good/Better/Best{selected.gbb?.sqFt ? " ✓" : ""}</button>
                     {isAdmin && <button onClick={() => setScopeReviewOpen(true)} style={{ background:"#38bdf822", border:"1px solid #38bdf8", color:"#38bdf8", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>🔎 Scope Review{selected.scopeReviews?.length ? ` (${selected.scopeReviews.length})` : ""}</button>}
                     <button onClick={async () => { const token = selected.portal_token || newPortalToken(); if (!selected.portal_token) updateJob(selected.id, { portal_token: token }); const link = `${window.location.origin}/portal/${token}`; navigator.clipboard.writeText(link); alert("Portal link copied!"); }} style={{ background:GOLD+"22", border:`1px solid ${GOLD}`, color:GOLD, borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>🔗 Portal Link</button>
@@ -1538,7 +1541,7 @@ export default function Pipeline({ session }) {
             <Sec title="Hover & Assignment">
               <div style={{ display:"grid", gridTemplateColumns:isMobile?"1fr":"1fr 1fr", gap:10 }}>
                 <F label="Hover Job ID" value={form.hoverId} onChange={v => setForm(p=>({...p,hoverId:v}))} placeholder="e.g. 1234567"/>
-                {isAdmin
+                {(isAdmin || isManager)
                   ? <Sel label="Assigned To" value={form.assigned} onChange={v => setForm(p=>({...p,assigned:v}))}
                       options={[{ value:"", label:"Unassigned" }, ...[...new Set([...staffNames, ...(form.assigned ? [form.assigned] : [])])].map(n => ({ value:n, label:n }))]}/>
                   : <F label="Assigned To" value={form.assigned} onChange={() => {}} disabled/>}
