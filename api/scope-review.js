@@ -154,7 +154,7 @@ const lines = (arr) => (Array.isArray(arr) ? arr : []).map(String).join("\n");
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
-  if (!(await requireStaff(req, res, { role: "admin" }))) return;
+  if (!(await requireStaff(req, res, { role: ["admin", "manager"] }))) return;
 
   const { mode, jobId, payload = {} } = req.body || {};
   const jobKey = String(jobId ?? "");

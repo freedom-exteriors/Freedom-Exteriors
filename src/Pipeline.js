@@ -701,8 +701,11 @@ export default function Pipeline({ session }) {
   const userEmail = session?.user?.email;
   const isAdmin = staffProfile?.role === "admin";
   const isManager = staffProfile?.role === "manager";
-  // Commission/profit numbers: admins see every job; everyone else only their own.
-  const canSeeCommission = job => isAdmin || (!!job?.assigned && job.assigned === staffProfile?.name);
+  // Managers (Victor) see and work every job. Only the owner-admin keeps
+  // QuickBooks, profitability/commission, pricing settings and deleting jobs.
+  const fullAccess = isAdmin || isManager;
+  // Commission/profit numbers: admins see every job; reps only their own; managers none.
+  const canSeeCommission = job => isAdmin || (!isManager && !!job?.assigned && job.assigned === staffProfile?.name);
 
   const filtered = jobs.filter(j => {
     if (filterStage !== "all" && j.stage !== filterStage) return false;
@@ -1207,7 +1210,7 @@ export default function Pipeline({ session }) {
 
               {jobTab==="details" && (
                 <div>
-                  {isAdmin && <div style={{ display:"flex", gap:8, marginBottom:12, flexWrap:"wrap" }}>
+                  {fullAccess && <div style={{ display:"flex", gap:8, marginBottom:12, flexWrap:"wrap" }}>
                     <a href={(() => { const e = buildRepEmail(selected, staffRoster); return `mailto:${e.to}?subject=${encodeURIComponent(e.subject)}&body=${encodeURIComponent(e.body)}`; })()}
                       style={{ background:"none", border:"1px solid #38bdf8", color:"#38bdf8", borderRadius:7, padding:"7px 12px", fontWeight:700, fontSize:11, textDecoration:"none", fontFamily:"inherit" }}>
                       📧 Email to Rep{selected.assigned && selected.assigned!=="Nick" ? ` (${selected.assigned})` : ""}
@@ -1278,7 +1281,7 @@ export default function Pipeline({ session }) {
                     <button onClick={() => setDocsAckOpen(true)} style={{ background:"#e8a82022", border:`1px solid ${GOLD}`, color:GOLD, borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>📋 Docs Acknowledgement{selected.docsAcknowledgement?.homeownerSignature ? " ✓" : ""}</button>
                     {canSeeCommission(selected) && <button onClick={() => setCommissionOpen(true)} style={{ background:GREEN+"22", border:`1px solid ${GREEN}`, color:GREEN, borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>💰 Commission{selected.commission?.grossRevenue ? " ✓" : ""}</button>}
                     <button onClick={() => setGbbOpen(true)} style={{ background:"#fbbf2422", border:"1px solid #fbbf24", color:"#fbbf24", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>📐 Good/Better/Best{selected.gbb?.sqFt ? " ✓" : ""}</button>
-                    {isAdmin && <button onClick={() => setScopeReviewOpen(true)} style={{ background:"#38bdf822", border:"1px solid #38bdf8", color:"#38bdf8", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>🔎 Scope Review{selected.scopeReviews?.length ? ` (${selected.scopeReviews.length})` : ""}</button>}
+                    {fullAccess && <button onClick={() => setScopeReviewOpen(true)} style={{ background:"#38bdf822", border:"1px solid #38bdf8", color:"#38bdf8", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>🔎 Scope Review{selected.scopeReviews?.length ? ` (${selected.scopeReviews.length})` : ""}</button>}
                     <button onClick={async () => { const token = selected.portal_token || newPortalToken(); if (!selected.portal_token) updateJob(selected.id, { portal_token: token }); const link = `${window.location.origin}/portal/${token}`; navigator.clipboard.writeText(link); alert("Portal link copied!"); }} style={{ background:GOLD+"22", border:`1px solid ${GOLD}`, color:GOLD, borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>🔗 Portal Link</button>
                     {isAdmin && <button onClick={() => openInvoiceTool(selected, "estimate")} style={{ background:"#0E8A9622", border:"1px solid #0E8A96", color:"#2bb7c4", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>🧾 New Estimate ↗</button>}
                     {isAdmin && (selected.qbInvoiceId
@@ -1541,7 +1544,7 @@ export default function Pipeline({ session }) {
             <Sec title="Hover & Assignment">
               <div style={{ display:"grid", gridTemplateColumns:isMobile?"1fr":"1fr 1fr", gap:10 }}>
                 <F label="Hover Job ID" value={form.hoverId} onChange={v => setForm(p=>({...p,hoverId:v}))} placeholder="e.g. 1234567"/>
-                {(isAdmin || isManager)
+                {fullAccess
                   ? <Sel label="Assigned To" value={form.assigned} onChange={v => setForm(p=>({...p,assigned:v}))}
                       options={[{ value:"", label:"Unassigned" }, ...[...new Set([...staffNames, ...(form.assigned ? [form.assigned] : [])])].map(n => ({ value:n, label:n }))]}/>
                   : <F label="Assigned To" value={form.assigned} onChange={() => {}} disabled/>}
@@ -1655,7 +1658,7 @@ export default function Pipeline({ session }) {
       )}
 
       {/* GOOD / BETTER / BEST PRICING */}
-      {scopeReviewOpen && selected && isAdmin && (
+      {scopeReviewOpen && selected && fullAccess && (
         <ScopeReview
           job={selected}
           onSave={(patch) => updateJob(selected.id, patch)}
