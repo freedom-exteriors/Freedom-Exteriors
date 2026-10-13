@@ -123,27 +123,54 @@ const stateColor = s => STATE_COLORS[s] || "#6b8099";
 
 const PHOTO_CATS = ["Damage","Before","After","Adjuster Visit","Supplement","Deposit Check","Misc"];
 
+const CHECKLIST_PHASES = ["Lead","Estimation","Claim","Job Prep","Production","Closeout"];
 const CHECKLIST_ITEMS = [
-  { id:"c1",  label:"Schedule Product Meeting — review trades, selections, ACV/RCV basics" },
-  { id:"c2",  label:"Color Form completed — manufacturer, product, color confirmed & signed" },
-  { id:"c3",  label:"Collect Down Payment — 1st check (ACV), deductible, retail upgrades" },
-  { id:"c4",  label:"Letter of Authorization (LOA) — verify lender, all parties signed" },
-  { id:"c5",  label:"Skylight — measurements, photos inside/outside, exemption form if needed" },
-  { id:"c6",  label:"Retail Agreement / Contract signed" },
-  { id:"c7",  label:"Lead Form signed (if home built 1979 or prior)" },
-  { id:"c8",  label:"Home Conditions Report (HCR) — photos of damage/deterioration, signed" },
-  { id:"c9",  label:"Decking Photos / Attic Inspection — tape measure in each photo" },
-  { id:"c10", label:"Pictures + Specs — attic, elevation, fascia, drip edge, sider's edge, heat tape" },
-  { id:"c11", label:"Pre-Build Precaution Letter — all 8 items initialed by homeowner" },
-  { id:"c12", label:"Contractor Documents Acknowledgement signed" },
-  { id:"c13", label:"MN Mandatory Lien Notice delivered & signed" },
-  { id:"c14", label:"Cancellation Notice (MN §326B.811) — 2 copies to homeowner" },
-  { id:"c15", label:"Permit pulled" },
-  { id:"c16", label:"Materials ordered (ABC Supply)" },
-  { id:"c17", label:"Dumpster scheduled" },
-  { id:"c18", label:"Crew scheduled & confirmed" },
-  { id:"c19", label:"Final inspection complete" },
-  { id:"c20", label:"Final invoice sent / collected" },
+  // Lead
+  { phase:"Lead", id:"c21", label:"Appointment scheduled" },
+  { phase:"Lead", id:"c22", label:"Appointment completed / No show (reschedule if needed)" },
+  { phase:"Lead", id:"c23", label:"Lead follow-up" },
+  // Estimation
+  { phase:"Estimation", id:"c24", label:"Inspection and measurements" },
+  { phase:"Estimation", id:"c25", label:"Labor and materials estimate" },
+  { phase:"Estimation", id:"c26", label:"Presentation to homeowner" },
+  { phase:"Estimation", id:"c1",  label:"Schedule Product Meeting — review trades, selections, ACV/RCV basics" },
+  { phase:"Estimation", id:"c6",  label:"Estimate approval — Retail Agreement / Contract signed" },
+  // Claim
+  { phase:"Claim", id:"c27", label:"Claim filed" },
+  { phase:"Claim", id:"c28", label:"Claim status confirmed" },
+  { phase:"Claim", id:"c29", label:"Supplement" },
+  { phase:"Claim", id:"c30", label:"Insurance claim approval" },
+  // Job Prep
+  { phase:"Job Prep", id:"c2",  label:"Color Form completed — manufacturer, product, color confirmed & signed" },
+  { phase:"Job Prep", id:"c3",  label:"Collect Down Payment — 1st check (ACV), deductible, retail upgrades" },
+  { phase:"Job Prep", id:"c4",  label:"Letter of Authorization (LOA) — verify lender, all parties signed" },
+  { phase:"Job Prep", id:"c5",  label:"Skylight — measurements, photos inside/outside, exemption form if needed" },
+  { phase:"Job Prep", id:"c7",  label:"Lead Form signed (if home built 1979 or prior)" },
+  { phase:"Job Prep", id:"c8",  label:"Home Conditions Report (HCR) — photos of damage/deterioration, signed" },
+  { phase:"Job Prep", id:"c9",  label:"Decking Photos / Attic Inspection — tape measure in each photo" },
+  { phase:"Job Prep", id:"c10", label:"Pictures + Specs — attic, elevation, fascia, drip edge, sider's edge, heat tape" },
+  { phase:"Job Prep", id:"c11", label:"Pre-Build Precaution Letter — all 8 items initialed by homeowner" },
+  { phase:"Job Prep", id:"c12", label:"Contractor Documents Acknowledgement signed" },
+  { phase:"Job Prep", id:"c13", label:"MN Mandatory Lien Notice delivered & signed" },
+  { phase:"Job Prep", id:"c14", label:"Cancellation Notice (MN §326B.811) — 2 copies to homeowner" },
+  { phase:"Job Prep", id:"c31", label:"Purchase order received" },
+  { phase:"Job Prep", id:"c32", label:"Pre-construction meeting scheduled" },
+  { phase:"Job Prep", id:"c15", label:"Permit pulled" },
+  { phase:"Job Prep", id:"c16", label:"Materials ordered (ABC Supply)" },
+  { phase:"Job Prep", id:"c17", label:"Dumpster scheduled" },
+  { phase:"Job Prep", id:"c33", label:"Installer assigned & labor ticket created" },
+  { phase:"Job Prep", id:"c34", label:"Pre-construction checklist completed" },
+  // Production
+  { phase:"Production", id:"c18", label:"Job scheduled — crew scheduled & confirmed" },
+  { phase:"Production", id:"c35", label:"Job in progress" },
+  { phase:"Production", id:"c36", label:"Post-production checklist completed" },
+  { phase:"Production", id:"c19", label:"Final inspection complete" },
+  { phase:"Production", id:"c20", label:"Final invoice sent" },
+  // Closeout
+  { phase:"Closeout", id:"c37", label:"Final payment processed" },
+  { phase:"Closeout", id:"c38", label:"Warranty registered" },
+  { phase:"Closeout", id:"c39", label:"Customer review inquiry sent" },
+  { phase:"Closeout", id:"c40", label:"Job closed" },
 ];
 
 const ABC_CATALOG = [
@@ -1257,14 +1284,25 @@ export default function Pipeline({ session }) {
                   </div>
                   {(() => { const pct = Math.round(Object.values(selected.checklist||{}).filter(Boolean).length/CHECKLIST_ITEMS.length*100); return <div style={{ background:BORDER, borderRadius:4, height:8, marginBottom:14 }}><div style={{ background:pct===100?"#10b981":TEAL, borderRadius:4, height:8, width:`${pct}%`, transition:"width 0.3s" }}/></div>; })()}
                   <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
-                    {CHECKLIST_ITEMS.map(item => {
-                      const checked = selected.checklist?.[item.id] || false;
+                    {CHECKLIST_PHASES.map(phase => {
+                      const items = CHECKLIST_ITEMS.filter(i => i.phase === phase);
+                      const doneN = items.filter(i => selected.checklist?.[i.id]).length;
                       return (
-                        <div key={item.id} onClick={() => toggleCheck(selected.id, item.id)} style={{ display:"flex", alignItems:"flex-start", gap:10, padding:"10px 12px", background:checked?TEAL+"11":PANEL2, border:`1px solid ${checked?TEAL:BORDER}`, borderRadius:7, cursor:"pointer" }}>
-                          <div style={{ width:20, height:20, borderRadius:4, border:`2px solid ${checked?TEAL:BORDER}`, background:checked?TEAL:"none", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, marginTop:1 }}>
-                            {checked && <span style={{ color:"#fff", fontSize:12, fontWeight:800 }}>✓</span>}
+                        <div key={phase} style={{ display:"flex", flexDirection:"column", gap:6, marginTop:8 }}>
+                          <div style={{ display:"flex", justifyContent:"space-between", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800, fontSize:14, letterSpacing:1, textTransform:"uppercase", color:doneN===items.length?GREEN:GOLD }}>
+                            <span>{phase}</span><span>{doneN}/{items.length}</span>
                           </div>
-                          <span style={{ fontSize:13, color:checked?TEXT:MUTED, lineHeight:1.5, textDecoration:checked?"line-through":"none" }}>{item.label}</span>
+                          {items.map(item => {
+                            const checked = selected.checklist?.[item.id] || false;
+                            return (
+                              <div key={item.id} onClick={() => toggleCheck(selected.id, item.id)} style={{ display:"flex", alignItems:"flex-start", gap:10, padding:"10px 12px", background:checked?TEAL+"11":PANEL2, border:`1px solid ${checked?TEAL:BORDER}`, borderRadius:7, cursor:"pointer" }}>
+                                <div style={{ width:20, height:20, borderRadius:4, border:`2px solid ${checked?TEAL:BORDER}`, background:checked?TEAL:"none", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, marginTop:1 }}>
+                                  {checked && <span style={{ color:"#fff", fontSize:12, fontWeight:800 }}>✓</span>}
+                                </div>
+                                <span style={{ fontSize:13, color:checked?TEXT:MUTED, lineHeight:1.5, textDecoration:checked?"line-through":"none" }}>{item.label}</span>
+                              </div>
+                            );
+                          })}
                         </div>
                       );
                     })}
