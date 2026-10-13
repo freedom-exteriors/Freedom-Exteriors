@@ -15,6 +15,7 @@ export const LEAD_SOURCES = [
   { id: "yard_sign", label: "Yard sign / truck / job-site sign", detail: "Which job or truck? (optional)" },
   { id: "partner", label: "Partner / contractor / insurance agent", detail: "Whose referral?" },
   { id: "repeat", label: "Repeat customer", detail: "" },
+  { id: "government", label: "Government contract", detail: "Which agency / bid number?" },
   { id: "other", label: "Other", detail: "Describe" },
 ];
 
