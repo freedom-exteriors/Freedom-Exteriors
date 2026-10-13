@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { supabase } from "./supabase";
 import { apiFetch } from "./apiFetch";
 import ContractFill from "./ContractFill";
+import Reports from "./Reports";
 import CommissionWorkbook, { calcCommission, leadSource, PAID_LEAD_COLOR } from "./CommissionWorkbook";
 import ContractorAgreement from "./ContractorAgreement";
 import RetailContract from "./RetailContract";
@@ -720,7 +721,10 @@ export default function Pipeline({ session }) {
     if (!form.name.trim()) return;
     const isNew = !editing;
     const token = newPortalToken();
-    const jobWithToken = isNew ? { ...form, portal_token: token } : form;
+    const prevJob = editing ? jobs.find(j => j.id === form.id) : null;
+    const stageMoved = isNew || (prevJob && prevJob.stage !== form.stage);
+    const stamped = stageMoved ? { ...form, stageAt: new Date().toISOString() } : form;
+    const jobWithToken = isNew ? { ...stamped, portal_token: token } : stamped;
     updateJobs(prev => editing ? prev.map(j => j.id === form.id ? jobWithToken : j) : [...prev, jobWithToken], [jobWithToken.id]);
     if (isNew) {
       const portalLink = window.location.origin + "/portal/" + token;
@@ -754,7 +758,7 @@ export default function Pipeline({ session }) {
     const next = STAGES[idx + dir];
     if (!next) return;
     const thankYou = next.id === "collected" && job.phone && !job.thankYouTextSentAt;
-    updateJob(job.id, { stage: next.id, ...(thankYou ? { thankYouTextSentAt: new Date().toISOString() } : {}) });
+    updateJob(job.id, { stage: next.id, stageAt: new Date().toISOString(), ...(thankYou ? { thankYouTextSentAt: new Date().toISOString() } : {}) });
     if (thankYou) notifyHomeowner("/api/send-sms", { to: job.phone, message: `Hi ${job.name}! Your project with Freedom Exteriors is complete. Thank you for choosing us!${REVIEW_URL ? ` Please leave us a review: ${REVIEW_URL}` : ""}` }, `Thank-you text to ${job.name}`);
   };
 
@@ -961,7 +965,7 @@ export default function Pipeline({ session }) {
 
       {/* NAV */}
       <nav style={{ background:PANEL2, borderBottom:`1px solid ${BORDER}`, padding:`0 ${isMobile?8:20}px`, display:"flex", alignItems:"center", gap:2, overflowX:"auto", WebkitOverflowScrolling:"touch" }}>
-        {[{id:"board",label:isMobile?"📋":"📋 Board"},{id:"list",label:isMobile?"📄":"📄 Jobs"},{id:"followups",label:isMobile?`🔔${followUps.length}`:`🔔 Follow-ups (${followUps.length})`},{id:"commission",label:isMobile?"💰":"💰 Commission"}].map(v => (
+        {[{id:"board",label:isMobile?"📋":"📋 Board"},{id:"list",label:isMobile?"📄":"📄 Jobs"},{id:"followups",label:isMobile?`🔔${followUps.length}`:`🔔 Follow-ups (${followUps.length})`},{id:"commission",label:isMobile?"💰":"💰 Commission"},{id:"reports",label:isMobile?"📊":"📊 Reports"}].map(v => (
           <button key={v.id} onClick={() => setMainView(v.id)} style={{ background:"none", border:"none", color:mainView===v.id?GOLD:MUTED, borderBottom:mainView===v.id?`2px solid ${GOLD}`:"2px solid transparent", padding:isMobile?"10px 12px":"12px 16px", cursor:"pointer", fontSize:isMobile?12:13, fontWeight:mainView===v.id?700:500, fontFamily:"inherit", whiteSpace:"nowrap", flexShrink:0 }}>{v.label}</button>
         ))}
         <div style={{ marginLeft:"auto", display:"flex", gap:6, alignItems:"center", flexShrink:0 }}>
@@ -1137,6 +1141,10 @@ export default function Pipeline({ session }) {
       )}
 
       {/* COMMISSION */}
+      {mainView==="reports" && (
+        <Reports jobs={jobs} stages={STAGES} isAdmin={isAdmin} isMobile={isMobile} onOpen={j => setSelected(j)} />
+      )}
+
       {mainView==="commission" && (
         <div style={{ padding:isMobile?8:16, maxWidth:900, margin:"0 auto" }}>
           <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800, fontSize:22, letterSpacing:1, marginBottom:16 }}>💰 Commission Workbook</div>
