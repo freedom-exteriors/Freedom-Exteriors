@@ -1259,6 +1259,11 @@ export default function Pipeline({ session }) {
                   {/* Action buttons — stacked on mobile */}
                   <div style={{ display:"flex", flexDirection:isMobile?"column":"row", gap:8, flexWrap:"wrap" }}>
                     <button onClick={() => toggleFollowUp(selected.id)} style={{ background:selected.followUp?GOLD+"22":PANEL2, border:`1px solid ${selected.followUp?GOLD:BORDER}`, color:selected.followUp?GOLD:MUTED, borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:600 }}>{selected.followUp?"🔔 Unmark Follow-up":"🔕 Mark Follow-up"}</button>
+                    {["lead","inspection"].includes(selected.stage) && (
+                      <button onClick={() => updateJob(selected.id, { autoFollowUpOff: !selected.autoFollowUpOff })} style={{ background:selected.autoFollowUpOff?PANEL2:TEAL+"22", border:`1px solid ${selected.autoFollowUpOff?BORDER:TEAL}`, color:selected.autoFollowUpOff?MUTED:TEAL, borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:600 }}>
+                        {selected.autoFollowUpOff ? "🤖 Auto follow-up: OFF" : `🤖 Auto follow-up: ON${selected.autoFollowUp?.sent?.length ? ` (${selected.autoFollowUp.sent.length}/4 sent)` : ""}`}
+                      </button>
+                    )}
                     <button onClick={() => openEdit(selected)} style={{ background:TEAL+"22", border:`1px solid ${TEAL}`, color:TEAL, borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>✏️ Edit Job</button>
                     <button onClick={() => setContractorAgreementOpen(true)} style={{ background:"#8b5cf622", border:"1px solid #8b5cf6", color:"#a78bfa", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>🤝 Consignment Agreement{selected.contractorAgreement?.homeownerSignature ? " ✓" : ""}</button>
                     <button onClick={() => setContractFillOpen(true)} style={{ background:GOLD+"22", border:`1px solid ${GOLD}`, color:GOLD, borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>📝 Roofing Contract{selected.contract?.ownerSignature && selected.contract?.contractorSignature ? " ✓" : ""}</button>
