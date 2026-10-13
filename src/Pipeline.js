@@ -702,10 +702,11 @@ export default function Pipeline({ session }) {
   const isAdmin = staffProfile?.role === "admin";
   const isManager = staffProfile?.role === "manager";
   // Managers (Victor) see and work every job. Only the owner-admin keeps
-  // QuickBooks, profitability/commission, pricing settings and deleting jobs.
+  // QuickBooks, profitability (Reports), pricing settings and deleting jobs.
   const fullAccess = isAdmin || isManager;
-  // Commission/profit numbers: admins see every job; reps only their own; managers none.
-  const canSeeCommission = job => isAdmin || (!isManager && !!job?.assigned && job.assigned === staffProfile?.name);
+  // Commission Workbook: admins and managers see every job (transparency); reps only their own.
+  // The commission tier stays locked to admin inside the workbook. Profitability in Reports is admin-only.
+  const canSeeCommission = job => fullAccess || (!!job?.assigned && job.assigned === staffProfile?.name);
 
   const filtered = jobs.filter(j => {
     if (filterStage !== "all" && j.stage !== filterStage) return false;
