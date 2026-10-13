@@ -1,4 +1,4 @@
-import { buildReports, daysInStage } from "./reportCalc";
+import { buildReports, daysInStage, solarAccuracy } from "./reportCalc";
 
 const STAGES = [
   { id: "lead", label: "New", color: "#000", icon: "" },
@@ -37,4 +37,14 @@ test("stale estimates and receivables", () => {
   expect(r.staleEstimates).toHaveLength(1);
   expect(r.receivables[0].owed).toBe(7000);
   expect(r.totals.owed).toBe(7000);
+});
+
+test("solar accuracy compares Solar area to the measurement report", () => {
+  const mk = (solar, real) => ({ solarEstimate: { totalAreaSqFt: solar, pitchRisePerTwelve: 6 }, eagleviewMeasurements: { totalRoofArea: real, predominantPitch: "6/12" } });
+  const r = solarAccuracy([mk(2200, 2000), mk(1800, 2000), mk(2000, 2000), { eagleviewMeasurements: { totalRoofArea: 1000 } }]);
+  expect(r.n).toBe(3);
+  expect(r.rows[0].errPct).toBeCloseTo(10);
+  expect(r.bias).toBeCloseTo(0);
+  expect(r.within10).toBe(100);
+  expect(solarAccuracy([]).n).toBe(0);
 });

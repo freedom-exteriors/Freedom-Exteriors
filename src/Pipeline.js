@@ -769,6 +769,23 @@ export default function Pipeline({ session }) {
     if (thankYou) notifyHomeowner("/api/send-sms", { to: job.phone, message: `Hi ${job.name}! Your project with Freedom Exteriors is complete. Thank you for choosing us!${REVIEW_URL ? ` Please leave us a review: ${REVIEW_URL}` : ""}` }, `Thank-you text to ${job.name}`);
   };
 
+  // For the Reports "Solar vs real measurement" card: run Google Solar on past jobs that already
+  // have a Hover/EagleView report, one at a time, and keep the result on the job.
+  const backfillSolar = async () => {
+    const todo = jobs.filter(j => !j.solarEstimate && roofMeasurements(j) && j.address && j.city && j.state);
+    let done = 0, failed = 0;
+    for (const job of todo) {
+      try {
+        const res = await apiFetch(`/api/solar?address=${encodeURIComponent(job.address)}&city=${encodeURIComponent(job.city)}&state=${encodeURIComponent(job.state)}`);
+        const d = await res.json();
+        if (!res.ok || !d.success) { failed++; continue; }
+        updateJob(job.id, { solarEstimate: { totalAreaSqFt: d.totalAreaSqFt, pitchRisePerTwelve: d.pitchRisePerTwelve, segmentCount: d.segmentCount, imageryQuality: d.imageryQuality, imageryDate: d.imageryDate, lowConfidence: d.lowConfidence, fetchedAt: new Date().toISOString() } });
+        done++;
+      } catch { failed++; }
+    }
+    return { done, failed };
+  };
+
   const toggleFollowUp = id => updateJob(id, { followUp: !jobs.find(j => j.id === id)?.followUp });
 
   const toggleCheck = (jobId, checkId) => {
@@ -1149,7 +1166,7 @@ export default function Pipeline({ session }) {
 
       {/* COMMISSION */}
       {mainView==="reports" && (
-        <Reports jobs={jobs} stages={STAGES} isAdmin={isAdmin} isMobile={isMobile} onOpen={j => setSelected(j)} />
+        <Reports jobs={jobs} stages={STAGES} isAdmin={isAdmin} isMobile={isMobile} onOpen={j => setSelected(j)} onBackfillSolar={backfillSolar} />
       )}
 
       {mainView==="commission" && (

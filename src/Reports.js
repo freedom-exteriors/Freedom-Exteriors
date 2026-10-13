@@ -1,5 +1,6 @@
-import { useMemo } from "react";
-import { buildReports } from "./reportCalc";
+import { useMemo, useState } from "react";
+import { buildReports, solarAccuracy } from "./reportCalc";
+import { roofMeasurements } from "./measurements";
 
 const GOLD = "#e8a820"; const PANEL = "#0f1923"; const PANEL2 = "#162030";
 const BORDER = "#1e3048"; const TEXT = "#e2eaf4"; const MUTED = "#6b8099"; const GREEN = "#10b981"; const RED = "#f87171";
@@ -39,7 +40,58 @@ function JobRow({ job, right, sub, onOpen }) {
   );
 }
 
-export default function Reports({ jobs, stages, isAdmin, isMobile, onOpen }) {
+const pct1 = n => `${n > 0 ? "+" : ""}${n.toFixed(1)}%`;
+
+function SolarCard({ jobs, onOpen, onBackfill }) {
+  const acc = useMemo(() => solarAccuracy(jobs), [jobs]);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState("");
+  const missing = jobs.filter(j => !j.solarEstimate && roofMeasurements(j) && j.address && j.city && j.state).length;
+
+  const run = async () => {
+    setBusy(true); setNote("");
+    try {
+      const { done, failed } = await onBackfill();
+      setNote(`Checked ${done} job${done === 1 ? "" : "s"}${failed ? `, ${failed} couldn't be found by Google` : ""}.`);
+    } catch (e) { setNote("Something went wrong — try again."); }
+    setBusy(false);
+  };
+
+  return (
+    <Card title="Google Solar vs real measurement" hint="How far the quick-quote roof size runs from a Hover/EagleView report, on jobs that have both. Positive = Solar measured too big.">
+      {acc.n === 0 ? <Empty>No jobs have both a Solar reading and a measurement report yet.</Empty> : (
+        <>
+          <div style={{ display:"flex", gap:10, flexWrap:"wrap", marginBottom:12 }}>
+            <Tile label="Jobs compared" value={acc.n} />
+            <Tile label="Typical miss" value={`${acc.medianAbs.toFixed(1)}%`} color={acc.medianAbs <= 10 ? GREEN : GOLD} />
+            <Tile label="Within 10%" value={`${acc.within10}%`} color={acc.within10 >= 70 ? GREEN : GOLD} />
+            <Tile label="Runs high or low" value={pct1(acc.bias)} />
+          </div>
+          <div style={{ fontSize:12, color:MUTED, marginBottom:10 }}>
+            {acc.n < 10 ? `Only ${acc.n} job${acc.n === 1 ? "" : "s"} so far — treat this as a hint, not a rule. ` : ""}
+            Suggested quote range: about ±{Math.max(5, Math.ceil(acc.p80Abs))}% (covers 8 in 10 of these jobs).
+          </div>
+          {acc.rows.slice(0, 12).map(x => (
+            <JobRow key={x.job.id} job={x.job} onOpen={onOpen}
+              sub={`Solar ${Math.round(x.solar).toLocaleString()} vs measured ${Math.round(x.real).toLocaleString()} sq ft${x.pitchDiff != null ? ` · pitch ${x.pitchDiff > 0 ? "+" : ""}${x.pitchDiff.toFixed(0)}/12` : ""}${x.lowConfidence ? " · low-confidence imagery" : ""}`}
+              right={<span style={{ color:Math.abs(x.errPct) <= 10 ? GREEN : Math.abs(x.errPct) <= 20 ? GOLD : RED }}>{pct1(x.errPct)}</span>} />
+          ))}
+        </>
+      )}
+      {missing > 0 && (
+        <div style={{ marginTop:12 }}>
+          <button onClick={run} disabled={busy} style={{ background:busy ? PANEL2 : "#1a9e9922", border:`1px solid ${busy ? BORDER : "#1a9e99"}`, color:busy ? MUTED : "#1a9e99", borderRadius:7, padding:"9px 14px", fontSize:13, fontWeight:700, cursor:busy ? "default" : "pointer", fontFamily:"inherit" }}>
+            {busy ? "Checking… (this takes a moment)" : `Run Solar on ${missing} past job${missing === 1 ? "" : "s"} with a report`}
+          </button>
+          <div style={{ fontSize:11, color:MUTED, marginTop:6 }}>Costs a few cents per job on your Google account.</div>
+        </div>
+      )}
+      {note && <div style={{ fontSize:12, color:TEXT, marginTop:8 }}>{note}</div>}
+    </Card>
+  );
+}
+
+export default function Reports({ jobs, stages, isAdmin, isMobile, onOpen, onBackfillSolar }) {
   const r = useMemo(() => buildReports(jobs, stages), [jobs, stages]);
   const maxCount = Math.max(1, ...r.byStage.map(s => s.count));
 
@@ -87,6 +139,8 @@ export default function Reports({ jobs, stages, isAdmin, isMobile, onOpen }) {
           </div>
         )}
       </Card>
+
+      {isAdmin && <SolarCard jobs={jobs} onOpen={onOpen} onBackfill={onBackfillSolar} />}
 
       <Card title="Estimates going stale" hint="Not yet approved, estimate entered, 7+ days in the same stage. Tap to open.">
         {r.staleEstimates.length === 0 ? <Empty>Nothing stale. 👍</Empty> :

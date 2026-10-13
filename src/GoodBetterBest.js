@@ -320,6 +320,7 @@ export default function GoodBetterBest({ job, pricing, catalog, onSave, onClose,
   const [fetchError, setFetchError] = useState(null);
   const [fetchInfo, setFetchInfo] = useState(null);
   const [lowConfidence, setLowConfidence] = useState(false);
+  const [solarEst, setSolarEst] = useState(null);
   const [productIds, setProductIds] = useState(job.gbb?.productIds || { good: "", better: "", best: "" });
   const [accessorySelections, setAccessorySelections] = useState(job.gbb?.accessorySelections || {});
 
@@ -345,7 +346,7 @@ export default function GoodBetterBest({ job, pricing, catalog, onSave, onClose,
   const setAccessoryQty = (id, qty) => setAccessorySelections(s => ({ ...s, [id]: { ...s[id], qty } }));
 
   const save = () => {
-    onSave({ gbb: { sqFt, pitch, stories, productIds, accessorySelections, result, accessoriesTotal, calculatedAt: new Date().toISOString() } });
+    onSave({ gbb: { sqFt, pitch, stories, productIds, accessorySelections, result, accessoriesTotal, calculatedAt: new Date().toISOString() }, ...(solarEst ? { solarEstimate: solarEst } : {}) });
     setSavedFlash(true);
     setTimeout(() => setSavedFlash(false), 1800);
   };
@@ -363,6 +364,7 @@ export default function GoodBetterBest({ job, pricing, catalog, onSave, onClose,
       setSqFt(data.totalAreaSqFt);
       setPitch(data.pitchRisePerTwelve);
       setLowConfidence(data.lowConfidence);
+      setSolarEst({ totalAreaSqFt: data.totalAreaSqFt, pitchRisePerTwelve: data.pitchRisePerTwelve, segmentCount: data.segmentCount, imageryQuality: data.imageryQuality, imageryDate: data.imageryDate, lowConfidence: data.lowConfidence, fetchedAt: new Date().toISOString() });
       const base = `Pulled ${data.totalAreaSqFt.toLocaleString()} sq ft across ${data.segmentCount} roof segment${data.segmentCount===1?"":"s"} · avg pitch ${data.pitchRisePerTwelve}/12${data.imageryDate ? ` · imagery from ${data.imageryDate.year}` : ""}.`;
       if (data.corrected) {
         setFetchInfo(`⚠️ Google's raw detection (${data.rawSegmentAreaSqFt.toLocaleString()} sq ft) was smaller than what's geometrically possible for a roof at this pitch on this footprint — bumped to ${data.totalAreaSqFt.toLocaleString()} sq ft as a mathematical floor. Real complexity is likely still higher. Verify with Hover.`);

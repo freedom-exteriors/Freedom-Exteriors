@@ -1,5 +1,7 @@
 // Pure number-crunching for the Reports tab. No React here so it can be tested.
 import { calcCommission } from "./CommissionWorkbook";
+import { roofMeasurements } from "./measurements";
+import { measuredPitch } from "./gbbMeasured";
 
 export const WON_FROM_STAGE = "approved"; // "closed" = reached Approved or later
 const DAY = 86400000;
@@ -76,5 +78,36 @@ export function buildReports(jobs, stages, now = Date.now()) {
       pipelineValue: open.reduce((n, j) => n + value(j), 0),
       owed: receivables.reduce((n, r) => n + r.owed, 0),
     },
+  };
+}
+
+// How far Google Solar's roof area runs from a real measurement report (Hover/EagleView),
+// on jobs that have both. Error % = (solar - measured) / measured; positive = Solar too big.
+export function solarAccuracy(jobs) {
+  const rows = [];
+  for (const job of jobs) {
+    const solar = Number(job.solarEstimate?.totalAreaSqFt);
+    const m = roofMeasurements(job);
+    const real = Number(m?.totalRoofArea);
+    if (!(solar > 0) || !(real > 0)) continue;
+    const pitchReal = parseFloat(measuredPitch(m));
+    const pitchSolar = parseFloat(job.solarEstimate?.pitchRisePerTwelve);
+    rows.push({
+      job, solar, real,
+      errPct: ((solar - real) / real) * 100,
+      pitchDiff: Number.isFinite(pitchReal) && Number.isFinite(pitchSolar) ? pitchSolar - pitchReal : null,
+      lowConfidence: !!job.solarEstimate?.lowConfidence,
+    });
+  }
+  const n = rows.length;
+  if (!n) return { n: 0, rows };
+  const abs = rows.map(r => Math.abs(r.errPct)).sort((a, b) => a - b);
+  const pick = q => abs[Math.min(n - 1, Math.floor(q * n))];
+  return {
+    n, rows: rows.sort((a, b) => Math.abs(b.errPct) - Math.abs(a.errPct)),
+    bias: rows.reduce((t, r) => t + r.errPct, 0) / n,
+    medianAbs: pick(0.5),
+    p80Abs: pick(0.8),
+    within10: Math.round((abs.filter(x => x <= 10).length / n) * 100),
   };
 }
