@@ -1,4 +1,4 @@
-import { buildReports, daysInStage, solarAccuracy } from "./reportCalc";
+import { buildReports, daysInStage, solarAccuracy, leadSourceReport } from "./reportCalc";
 
 const STAGES = [
   { id: "lead", label: "New", color: "#000", icon: "" },
@@ -47,4 +47,31 @@ test("solar accuracy compares Solar area to the measurement report", () => {
   expect(r.bias).toBeCloseTo(0);
   expect(r.within10).toBe(100);
   expect(solarAccuracy([]).n).toBe(0);
+});
+
+test("lead sources: close %, cost per sale, unrecorded kept apart", () => {
+  const jobs = [
+    { stage: "approved", leadSource: "paid_lead", leadCost: "100", estimate: { total: 10000 } },
+    { stage: "lead", leadSource: "paid_lead", leadCost: "100", estimate: { total: 0 } },
+    { stage: "installed", leadSource: "customer_referral", leadSourceDetail: "Dave Smith ", estimate: { total: 8000 } },
+    { stage: "collected", leadSource: "customer_referral", leadSourceDetail: "dave  smith", estimate: { total: 6000 } },
+    { stage: "lead", leadSource: "customer_referral", leadSourceDetail: "Ann", estimate: { total: 0 } },
+    { stage: "approved", estimate: { total: 5000 } },
+    { stage: "approved", leadSource: "old_free_text", estimate: { total: 2000 } },
+  ];
+  const r = leadSourceReport(jobs, STAGES);
+  const paid = r.rows.find(x => x.key === "paid_lead");
+  expect(paid).toMatchObject({ jobs: 2, won: 1, closePct: 50, wonValue: 10000, spent: 200, costPerSale: 200, costPerLead: 100, returnPerDollar: 50 });
+  const ref = r.rows.find(x => x.key === "customer_referral");
+  expect(ref).toMatchObject({ jobs: 3, won: 2, wonValue: 14000, spent: 0, costPerSale: null, returnPerDollar: null });
+  expect(r.rows.find(x => x.key === "old_free_text")).toBeTruthy();
+  expect(r.rows[0].key).toBe("customer_referral"); // most closed dollars first
+  expect(r.notRecorded).toMatchObject({ jobs: 1, wonValue: 5000 });
+  expect(r.coverage).toBe(86);
+  expect(r.topPeople[0]).toMatchObject({ name: "Dave Smith", jobs: 2, won: 2, wonValue: 14000 });
+});
+
+test("lead sources: empty list does not divide by zero", () => {
+  const r = leadSourceReport([], STAGES);
+  expect(r).toMatchObject({ rows: [], notRecorded: null, coverage: 0, total: 0 });
 });

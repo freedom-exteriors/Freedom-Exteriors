@@ -3,6 +3,7 @@ import { supabase } from "./supabase";
 import { apiFetch } from "./apiFetch";
 import ContractFill from "./ContractFill";
 import Reports from "./Reports";
+import { LEAD_SOURCES, leadSourceOf, leadSourceLabel } from "./leadSources";
 import CommissionWorkbook, { calcCommission, leadSource, PAID_LEAD_COLOR } from "./CommissionWorkbook";
 import ContractorAgreement from "./ContractorAgreement";
 import RetailContract from "./RetailContract";
@@ -525,7 +526,8 @@ function PortalActivity({ job }) {
 const blank = () => ({
   id: Date.now(), name:"", address:"", city:"", state:"MN", phone:"", email:"",
   type:"Roof", stage:"lead", claimNum:"", insurer:"State Farm", adjuster:"", adjPhone:"",
-  hoverId:"", notes:"", homeownerNote:"", followUp:false, assigned:"", parLead:false, paidLead:false, paidLeadSource:"",
+  hoverId:"", notes:"", homeownerNote:"", followUp:false, assigned:"", parLead:false,
+  leadSource:"", leadSourceDetail:"", leadCost:"", paidLead:false, paidLeadSource:"",
   added: new Date().toISOString().slice(0,10),
   photos:[], checklist:{}, materials:[], estimate:{total:0,downPayment:0,scope:"",deductible:0},
   contract:null, commission:{grossRevenue:0},
@@ -1239,7 +1241,7 @@ export default function Pipeline({ session }) {
                     </button>
                   </div>}
                   <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:12 }}>
-                    {[["Job Type",selected.type],["Assigned",selected.assigned],["Insurance",selected.insurer],["Claim #",selected.claimNum||"Not filed"],["Adjuster",selected.adjuster||"—"],["Adj. Phone",selected.adjPhone||"—"],["Date Added",selected.added]].map(([l,v]) => (
+                    {[["Job Type",selected.type],["Lead Source", leadSourceLabel(selected.leadSource) + (selected.leadSourceDetail ? ` — ${selected.leadSourceDetail}` : "")],["Assigned",selected.assigned],["Insurance",selected.insurer],["Claim #",selected.claimNum||"Not filed"],["Adjuster",selected.adjuster||"—"],["Adj. Phone",selected.adjPhone||"—"],["Date Added",selected.added]].map(([l,v]) => (
                       <div key={l} style={{ background:PANEL2, borderRadius:7, padding:"8px 10px" }}>
                         <div style={{ color:MUTED, fontSize:9, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:2 }}>{l}</div>
                         <div style={{ fontWeight:600, fontSize:12 }}>{v}</div>
@@ -1557,6 +1559,19 @@ export default function Pipeline({ session }) {
                 <F label="Claim Number" value={form.claimNum} onChange={v => setForm(p=>({...p,claimNum:v}))} placeholder="CLM-2026-XXXX"/>
                 <F label="Adjuster Name" value={form.adjuster} onChange={v => setForm(p=>({...p,adjuster:v}))}/>
                 <F label="Adjuster Phone" value={form.adjPhone} onChange={v => setForm(p=>({...p,adjPhone:v}))}/>
+              </div>
+            </Sec>
+            <Sec title="Lead Source">
+              <div style={{ display:"grid", gridTemplateColumns:isMobile?"1fr":"1fr 1fr", gap:10 }}>
+                <Sel label="Where did this lead come from?" value={form.leadSource || ""}
+                  onChange={v => setForm(p=>({...p,leadSource:v}))}
+                  options={[{ value:"", label:"— Select a source —" }, ...LEAD_SOURCES.map(o => ({ value:o.id, label:o.label })), ...(form.leadSource && !leadSourceOf(form.leadSource) ? [{ value:form.leadSource, label:form.leadSource }] : [])]}/>
+                {form.leadSource && leadSourceOf(form.leadSource)?.detail !== "" && (
+                  <F label={leadSourceOf(form.leadSource)?.detail || "Details"} value={form.leadSourceDetail} onChange={v => setForm(p=>({...p,leadSourceDetail:v}))} placeholder="Name, company, or note"/>
+                )}
+                {leadSourceOf(form.leadSource)?.paid && (
+                  <F label="What did this lead cost? ($)" value={form.leadCost} onChange={v => setForm(p=>({...p,leadCost:v.replace(/[^0-9.]/g,"")}))} placeholder="e.g. 85"/>
+                )}
               </div>
             </Sec>
             <Sec title="Hover & Assignment">

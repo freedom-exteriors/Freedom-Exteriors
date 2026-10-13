@@ -2,6 +2,7 @@
 import { calcCommission } from "./CommissionWorkbook";
 import { roofMeasurements } from "./measurements";
 import { measuredPitch } from "./gbbMeasured";
+import { LEAD_SOURCES, NOT_RECORDED, leadSourceOf } from "./leadSources";
 
 export const WON_FROM_STAGE = "approved"; // "closed" = reached Approved or later
 const DAY = 86400000;
@@ -109,5 +110,67 @@ export function solarAccuracy(jobs) {
     medianAbs: pick(0.5),
     p80Abs: pick(0.8),
     within10: Math.round((abs.filter(x => x <= 10).length / n) * 100),
+  };
+}
+
+// Which lead sources actually produce sales. "Closed" uses the same rule as the rep table
+// (reached Approved or later). Jobs with no source recorded are kept apart so old jobs
+// don't drag any real source down; `coverage` says how much of the picture is filled in.
+export function leadSourceReport(jobs, stages) {
+  const order = stages.map(s => s.id);
+  const wonIdx = order.indexOf(WON_FROM_STAGE);
+  const isWon = j => order.indexOf(j.stage) >= wonIdx;
+  const cost = j => Math.max(0, Number(j.leadCost) || 0);
+
+  const build = (key, label, list) => {
+    const won = list.filter(isWon);
+    const wonValue = won.reduce((n, j) => n + value(j), 0);
+    const spent = list.reduce((n, j) => n + cost(j), 0);
+    return {
+      key, label, jobs: list.length, won: won.length, wonValue,
+      closePct: list.length ? Math.round((won.length / list.length) * 100) : 0,
+      avgJob: won.length ? Math.round(wonValue / won.length) : 0,
+      spent,
+      costPerLead: spent && list.length ? Math.round(spent / list.length) : null,
+      costPerSale: spent && won.length ? Math.round(spent / won.length) : null,
+      // dollars of closed work per dollar spent; only meaningful when something was spent
+      returnPerDollar: spent ? Math.round((wonValue / spent) * 10) / 10 : null,
+      list,
+    };
+  };
+
+  const groups = new Map();
+  const unknown = [];
+  for (const j of jobs) {
+    const src = leadSourceOf(j.leadSource);
+    // An id that isn't in the list (older or hand-typed value) still gets its own row.
+    const key = src ? src.id : (j.leadSource ? String(j.leadSource) : null);
+    if (!key) { unknown.push(j); continue; }
+    if (!groups.has(key)) groups.set(key, { label: src ? src.label : String(j.leadSource), list: [] });
+    groups.get(key).list.push(j);
+  }
+  const known = LEAD_SOURCES.map(s => s.id).concat([...groups.keys()].filter(k => !leadSourceOf(k)));
+  const rows = [...new Set(known)].filter(k => groups.has(k)).map(k => build(k, groups.get(k).label, groups.get(k).list))
+    .sort((a, b) => b.wonValue - a.wonValue || b.jobs - a.jobs);
+
+  // Named people behind referrals / sphere / partners: who actually sends you work.
+  const nameKey = t => String(t || "").trim().toLowerCase().replace(/\s+/g, " ");
+  const people = new Map();
+  for (const j of jobs) {
+    const k = nameKey(j.leadSourceDetail);
+    if (!k || !["customer_referral", "sphere", "partner", "word_of_mouth"].includes(j.leadSource)) continue;
+    const p = people.get(k) || { name: String(j.leadSourceDetail).trim(), jobs: 0, won: 0, wonValue: 0 };
+    p.jobs += 1;
+    if (isWon(j)) { p.won += 1; p.wonValue += value(j); }
+    people.set(k, p);
+  }
+  const topPeople = [...people.values()].sort((a, b) => b.wonValue - a.wonValue || b.jobs - a.jobs).slice(0, 10);
+
+  return {
+    rows, topPeople,
+    notRecorded: unknown.length ? build("none", NOT_RECORDED, unknown) : null,
+    recorded: jobs.length - unknown.length,
+    total: jobs.length,
+    coverage: jobs.length ? Math.round(((jobs.length - unknown.length) / jobs.length) * 100) : 0,
   };
 }

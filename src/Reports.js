@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { buildReports, solarAccuracy } from "./reportCalc";
+import { buildReports, solarAccuracy, leadSourceReport } from "./reportCalc";
 import { roofMeasurements } from "./measurements";
 
 const GOLD = "#e8a820"; const PANEL = "#0f1923"; const PANEL2 = "#162030";
@@ -91,6 +91,68 @@ function SolarCard({ jobs, onOpen, onBackfill }) {
   );
 }
 
+function LeadSourceCard({ jobs, stages }) {
+  const ls = useMemo(() => leadSourceReport(jobs, stages), [jobs, stages]);
+  const all = ls.notRecorded ? [...ls.rows, ls.notRecorded] : ls.rows;
+  const anyCost = ls.rows.some(x => x.spent > 0);
+  const maxWon = Math.max(1, ...ls.rows.map(x => x.wonValue));
+  const best = ls.rows.filter(x => x.jobs >= 3).sort((a, b) => b.closePct - a.closePct || b.wonValue - a.wonValue)[0];
+  const th = { padding:"4px 8px", whiteSpace:"nowrap" };
+  const td = { padding:"8px", whiteSpace:"nowrap" };
+  return (
+    <Card title="Lead sources — what works" hint="Closed = job reached Approved or later. Close % = closed ÷ all leads from that source. Biggest closed dollars first.">
+      {ls.total === 0 ? <Empty>No jobs yet.</Empty> : (
+        <>
+          <div style={{ fontSize:12, color: ls.coverage >= 80 ? MUTED : GOLD, marginBottom:10 }}>
+            {ls.recorded} of {ls.total} jobs have a lead source ({ls.coverage}%).
+            {ls.coverage < 80 ? " Fill in the rest (open a job → Edit → Lead Source) before trusting the numbers." : ""}
+            {best ? ` Best close rate so far: ${best.label} at ${best.closePct}% (${best.won} of ${best.jobs}).` : ""}
+            {ls.rows.some(x => x.jobs < 5) ? " Sources with only a few jobs are a hint, not a rule." : ""}
+          </div>
+          {ls.rows.length === 0 ? <Empty>No job has a lead source yet. Pick one when you add or edit a job.</Empty> : (
+            <div style={{ overflowX:"auto" }}>
+              <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
+                <thead><tr style={{ color:MUTED, fontSize:10, textTransform:"uppercase", letterSpacing:1, textAlign:"right" }}>
+                  <th style={{ ...th, textAlign:"left" }}>Source</th><th style={th}>Leads</th><th style={th}>Closed</th><th style={th}>Close %</th>
+                  <th style={th}>Closed $</th><th style={th}>Avg job</th>
+                  {anyCost && <><th style={th}>Spent</th><th style={th}>Cost / sale</th><th style={th}>$ back per $1</th></>}
+                </tr></thead>
+                <tbody>{all.map(x => (
+                  <tr key={x.key} style={{ textAlign:"right", borderTop:`1px solid ${BORDER}`, opacity: x.key === "none" ? 0.7 : 1 }}>
+                    <td style={{ ...td, textAlign:"left", fontWeight:600 }}>
+                      {x.label}
+                      {x.key !== "none" && <div style={{ background:PANEL2, borderRadius:3, height:4, marginTop:4, width:120 }}><div style={{ background:GOLD, height:4, borderRadius:3, width:`${(x.wonValue / maxWon) * 100}%` }} /></div>}
+                    </td>
+                    <td style={td}>{x.jobs}</td><td style={td}>{x.won}</td>
+                    <td style={{ ...td, fontWeight:700, color: x.key === "none" ? TEXT : x.closePct >= 40 ? GREEN : x.closePct >= 20 ? GOLD : RED }}>{x.closePct}%</td>
+                    <td style={td}>{money(x.wonValue)}</td><td style={td}>{money(x.avgJob)}</td>
+                    {anyCost && <>
+                      <td style={td}>{x.spent ? money(x.spent) : "—"}</td>
+                      <td style={td}>{x.costPerSale != null ? money(x.costPerSale) : "—"}</td>
+                      <td style={{ ...td, fontWeight:700, color: x.returnPerDollar == null ? MUTED : x.returnPerDollar >= 10 ? GREEN : x.returnPerDollar >= 3 ? GOLD : RED }}>{x.returnPerDollar != null ? `$${x.returnPerDollar}` : "—"}</td>
+                    </>}
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          )}
+          {ls.topPeople.length > 0 && (
+            <div style={{ marginTop:16 }}>
+              <div style={{ fontSize:11, color:MUTED, textTransform:"uppercase", letterSpacing:1, marginBottom:4 }}>Who sends you work (referrals, sphere, partners, word of mouth)</div>
+              {ls.topPeople.map(p => (
+                <div key={p.name} style={{ display:"flex", justifyContent:"space-between", gap:10, padding:"7px 0", borderBottom:`1px solid ${BORDER}`, fontSize:13 }}>
+                  <div style={{ fontWeight:600 }}>{p.name}</div>
+                  <div style={{ color:MUTED }}>{p.jobs} lead{p.jobs === 1 ? "" : "s"} · {p.won} closed · <span style={{ color:TEXT, fontWeight:700 }}>{money(p.wonValue)}</span></div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </Card>
+  );
+}
+
 export default function Reports({ jobs, stages, isAdmin, isMobile, onOpen, onBackfillSolar }) {
   const r = useMemo(() => buildReports(jobs, stages), [jobs, stages]);
   const maxCount = Math.max(1, ...r.byStage.map(s => s.count));
@@ -139,6 +201,8 @@ export default function Reports({ jobs, stages, isAdmin, isMobile, onOpen, onBac
           </div>
         )}
       </Card>
+
+      <LeadSourceCard jobs={jobs} stages={stages} />
 
       {isAdmin && <SolarCard jobs={jobs} onOpen={onOpen} onBackfill={onBackfillSolar} />}
 
