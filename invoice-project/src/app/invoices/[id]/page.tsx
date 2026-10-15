@@ -230,7 +230,10 @@ export default function InvoiceDetail({ params }: { params: Promise<{ id: string
               {kind("change_order").map((c, i) => (
                 <tr key={`co${i}`}><td className="wrap">Change order: {c.description}</td><td className="num">{formatCents(c.amount_cents)}</td></tr>
               ))}
-              <tr><td><strong>BALANCE DUE</strong></td><td className="num"><strong>{formatCents(inv.balance_due_cents)}</strong></td></tr>
+              {inv.status === "paid" && inv.balance_due_cents > 0 && (
+                <tr><td className="wrap">Payment received {toUsDate(inv.paid_date)} · Final payment</td><td className="num">({formatCents(inv.balance_due_cents)})</td></tr>
+              )}
+              <tr><td><strong>BALANCE DUE</strong></td><td className="num"><strong>{formatCents(inv.status === "paid" ? 0 : inv.balance_due_cents)}</strong></td></tr>
             </tbody>
           </table>
         </div>

@@ -168,7 +168,7 @@ function Catalog() {
                 <td className="wrap">{r.job_address}</td>
                 <td>{toUsDate(r.invoice_date)}</td>
                 <td className="num">{formatCents(r.contract_total_cents + r.change_orders_total_cents)}</td>
-                <td className="num">{formatCents(r.balance_due_cents)}</td>
+                <td className="num">{formatCents(r.status === "paid" ? 0 : r.balance_due_cents)}</td>
                 <td>
                   <span className={`pill ${r.status}`}>{r.status === "paid" ? `Paid ${toUsDate(r.paid_date)}` : r.status[0].toUpperCase() + r.status.slice(1)}</span>
                   {r.qb_doc_number && <span className="pill qb" style={{ marginLeft: 6 }} title="In QuickBooks">QB</span>}
