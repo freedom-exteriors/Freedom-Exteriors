@@ -526,6 +526,7 @@ const blank = () => ({
   id: Date.now(), name:"", address:"", city:"", state:"MN", phone:"", email:"",
   type:"Roof", stage:"lead", claimNum:"", insurer:"State Farm", adjuster:"", adjPhone:"",
   hoverId:"", notes:"", homeownerNote:"", followUp:false, assigned:"", parLead:false, paidLead:false, paidLeadSource:"",
+  noDamage:false, noDamageNote:"", noDamageAt:null,
   added: new Date().toISOString().slice(0,10),
   photos:[], checklist:{}, materials:[], estimate:{total:0,downPayment:0,scope:"",deductible:0},
   contract:null, commission:{grossRevenue:0},
@@ -571,6 +572,7 @@ export default function Pipeline({ session }) {
   const [mainView, setMainView] = useState("board");
   const [filterStage, setFilterStage] = useState("all");
   const [filterState, setFilterState] = useState("all");
+  const [showNoDamage, setShowNoDamage] = useState(false);
   const [selected, setSelected] = useState(null);
   const [jobTab, setJobTab] = useState("details");
   const [showForm, setShowForm] = useState(false);
@@ -695,7 +697,7 @@ export default function Pipeline({ session }) {
     });
   }, [jobs]);
 
-  const followUps = jobs.filter(j => j.followUp);
+  const followUps = jobs.filter(j => j.followUp && !j.noDamage);
   const stageObj = id => STAGES.find(s => s.id === id) || STAGES[0];
 
   const userEmail = session?.user?.email;
@@ -708,11 +710,15 @@ export default function Pipeline({ session }) {
   // The commission tier stays locked to admin inside the workbook. Profitability in Reports is admin-only.
   const canSeeCommission = job => fullAccess || (!!job?.assigned && job.assigned === staffProfile?.name);
 
+  // No Damage leads are kept out of the working pipeline (so they never drag down a
+  // close rate someone eyeballs off the board/list) unless explicitly browsing them.
   const filtered = jobs.filter(j => {
+    if (!!j.noDamage !== showNoDamage) return false;
     if (filterStage !== "all" && j.stage !== filterStage) return false;
     if (filterState !== "all" && j.state !== filterState) return false;
     return true;
   });
+  const noDamageCount = jobs.filter(j => j.noDamage).length;
 
   const openNew = () => { setForm({ ...blank(), assigned: staffProfile?.name || "" }); setEditing(false); setShowForm(true); setSelected(null); };
   const openEdit = (job) => { setForm({...job}); setEditing(true); setShowForm(true); setSelected(null); };
@@ -993,6 +999,11 @@ export default function Pipeline({ session }) {
           <button key={v.id} onClick={() => setMainView(v.id)} style={{ background:"none", border:"none", color:mainView===v.id?GOLD:MUTED, borderBottom:mainView===v.id?`2px solid ${GOLD}`:"2px solid transparent", padding:isMobile?"10px 12px":"12px 16px", cursor:"pointer", fontSize:isMobile?12:13, fontWeight:mainView===v.id?700:500, fontFamily:"inherit", whiteSpace:"nowrap", flexShrink:0 }}>{v.label}</button>
         ))}
         <div style={{ marginLeft:"auto", display:"flex", gap:6, alignItems:"center", flexShrink:0 }}>
+          {noDamageCount > 0 && (
+            <button onClick={() => setShowNoDamage(v => !v)} style={{ background:showNoDamage?"#64748b22":"none", border:`1px solid ${showNoDamage?"#64748b":BORDER}`, color:showNoDamage?"#94a3b8":MUTED, borderRadius:6, padding:"3px 8px", fontSize:10, fontWeight:700, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" }}>
+              {showNoDamage ? "← Back to pipeline" : `🚫 No Damage (${noDamageCount})`}
+            </button>
+          )}
           {["all",...STATES].map(s => {
             const c = s === "all" ? TEAL : stateColor(s);
             return (
@@ -1029,6 +1040,7 @@ export default function Pipeline({ session }) {
                         <span style={{ background:TEAL+"22", color:TEAL, borderRadius:3, padding:"1px 6px", fontSize:10, fontWeight:600 }}>{job.type}</span>
                         {job.parLead && <span style={{ background:"#22d3ee22", color:"#22d3ee", borderRadius:3, padding:"1px 6px", fontSize:10, fontWeight:700, marginLeft:4 }}>📞 PAR</span>}
                         {job.paidLead && !job.parLead && <span style={{ background:PAID_LEAD_COLOR+"22", color:PAID_LEAD_COLOR, borderRadius:3, padding:"1px 6px", fontSize:10, fontWeight:700, marginLeft:4 }}>💵 PAID LEAD</span>}
+                        {job.noDamage && <span style={{ background:"#64748b22", color:"#94a3b8", borderRadius:3, padding:"1px 6px", fontSize:10, fontWeight:700, marginLeft:4 }}>🚫 NO DAMAGE</span>}
                         {job.estimate?.total > 0 && <div style={{ fontSize:10, color:"#10b981", marginTop:3, fontWeight:700 }}>${job.estimate.total.toLocaleString()}</div>}
                         {job.claimNum && <div style={{ fontSize:10, color:GOLD, marginTop:2, fontFamily:"monospace" }}>{job.claimNum}</div>}
                         <div style={{ marginTop:6 }}>
@@ -1268,6 +1280,15 @@ export default function Pipeline({ session }) {
                       </div>
                     </div>
                   )}
+                  {selected.noDamage && (
+                    <div style={{ background:"#64748b11", border:"1px solid #64748b44", borderRadius:8, padding:"10px 14px", marginBottom:12, display:"flex", alignItems:"center", gap:10 }}>
+                      <span style={{ fontSize:18 }}>🚫</span>
+                      <div>
+                        <div style={{ fontWeight:700, fontSize:12, color:"#94a3b8" }}>Marked No Damage{selected.noDamageAt ? ` — ${new Date(selected.noDamageAt).toLocaleDateString()}` : ""}</div>
+                        <div style={{ fontSize:11, color:MUTED, marginTop:2 }}>{selected.noDamageNote || "Kept out of the working pipeline and out of close-rate counts."}</div>
+                      </div>
+                    </div>
+                  )}
                   {selected.notes && <div style={{ background:PANEL2, borderRadius:7, padding:"10px 12px", marginBottom:12 }}><div style={{ color:MUTED, fontSize:9, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:4 }}>Internal Notes</div><div style={{ fontSize:13, lineHeight:1.6 }}>{selected.notes}</div></div>}
                   {selected.homeownerNote && <div style={{ background:PANEL2, borderRadius:7, padding:"10px 12px", marginBottom:12 }}><div style={{ color:MUTED, fontSize:9, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:4 }}>Note for Homeowner (visible in portal)</div><div style={{ fontSize:13, lineHeight:1.6 }}>{selected.homeownerNote}</div></div>}
                   <PortalActivity job={selected}/>
@@ -1307,6 +1328,15 @@ export default function Pipeline({ session }) {
                       : <button onClick={() => openInvoiceTool(selected, "invoice")} style={{ background:"#2CA01C22", border:"1px solid #2CA01C", color:"#2CA01C", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>🧾 New Invoice ↗</button>)}
                     {selected.installDate && <button onClick={() => openGoogleCalendar(selected)} style={{ background:"#1a73e822", border:"1px solid #1a73e8", color:"#1a73e8", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>📅 Add to Calendar</button>}
                     {selected.hoverId && <button onClick={() => fetchHoverMeasurements(selected)} style={{ background:"#ff6b2222", border:"1px solid #ff6b22", color:"#ff6b22", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>📐 Fetch Measurements</button>}
+                    {selected.noDamage ? (
+                      <button onClick={() => updateJob(selected.id, { noDamage:false, noDamageNote:"", noDamageAt:null })} style={{ background:"#64748b22", border:"1px solid #64748b", color:"#94a3b8", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>↩️ Restore to Pipeline</button>
+                    ) : (
+                      <button onClick={() => {
+                        const note = window.prompt(`Mark ${selected.name || "this lead"} as No Damage. This keeps it on file but out of the active pipeline and out of close-rate counts.\n\nOptional note (e.g. "no storm damage found on inspection"):`, "");
+                        if (note === null) return;
+                        updateJob(selected.id, { noDamage:true, noDamageNote:note, noDamageAt:new Date().toISOString() });
+                      }} style={{ background:"#64748b22", border:"1px solid #64748b", color:"#94a3b8", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700 }}>🚫 Mark No Damage</button>
+                    )}
                     {isAdmin && <button onClick={() => removeJob(selected.id)} style={{ background:"#7c2d1222", border:"1px solid #7c2d12", color:"#f87171", borderRadius:7, padding:"10px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13 }}>🗑️ Delete</button>}
                   </div>
                   <EagleViewImport key={selected.id} job={selected} onImported={m => updateJob(selected.id, { eagleviewMeasurements: m })} onPatch={patch => updateJob(selected.id, patch)} />

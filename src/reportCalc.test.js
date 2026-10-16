@@ -28,6 +28,20 @@ test("closing % counts Approved and later per rep", () => {
   expect(r.totals.open).toBe(2);
 });
 
+test("a lead marked No Damage doesn't count against a rep's close %", () => {
+  const jobs = [
+    { assigned: "Nick", stage: "lead", estimate: { total: 1000 }, added: "2026-10-01" },
+    { assigned: "Nick", stage: "approved", estimate: { total: 9000 }, added: "2026-10-01" },
+    { assigned: "Nick", stage: "lead", estimate: { total: 500 }, added: "2026-10-01", noDamage: true },
+  ];
+  const r = buildReports(jobs, STAGES, NOW);
+  const nick = r.repRows.find(x => x.name === "Nick");
+  expect(nick.jobs).toBe(2); // the No Damage lead isn't counted at all
+  expect(nick.closePct).toBe(50);
+  expect(r.byStage.find(s => s.id === "lead").count).toBe(1);
+  expect(r.totals.open).toBe(2);
+});
+
 test("stale estimates and receivables", () => {
   const jobs = [
     { stage: "inspection", estimate: { total: 8000 }, stageAt: "2026-10-01T00:00:00Z" },
