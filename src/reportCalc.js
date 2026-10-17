@@ -20,7 +20,11 @@ export function daysInStage(job, now = Date.now()) {
 
 const value = j => Number(j.estimate?.total) || 0;
 
-export function buildReports(jobs, stages, now = Date.now()) {
+export function buildReports(rawJobs, stages, now = Date.now()) {
+  // A lead marked No Damage never had anything to close — it's excluded from every
+  // report here (stage counts, pipeline value, rep close %) rather than counting
+  // against a rep as an unclosed job forever.
+  const jobs = rawJobs.filter(j => !j.noDamage);
   const order = stages.map(s => s.id);
   const wonIdx = order.indexOf(WON_FROM_STAGE);
   const open = jobs.filter(j => j.stage !== "collected");
